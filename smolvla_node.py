@@ -14,13 +14,18 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
 import torch
 
-from lerobot.policies import make_pre_post_processors
-from lerobot.policies.smolvla import SmolVLAPolicy
+# Prefer the checkout next to this script over an unrelated site-packages
+# installation. The LeRobot package imports many optional policies at package
+# import time, so keep those imports lazy until a model is actually requested.
+_LOCAL_LEROBOT_SRC = Path(__file__).resolve().parent / "lerobot" / "src"
+if _LOCAL_LEROBOT_SRC.is_dir() and str(_LOCAL_LEROBOT_SRC) not in sys.path:
+    sys.path.insert(0, str(_LOCAL_LEROBOT_SRC))
 
 
 IMAGE_KEYS = ("observation.images.laptop", "observation.images.phone")
@@ -52,23 +57,47 @@ def _validate_image(name: str, image: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(image)
 
 
+def _image_tensor(name: str, image: np.ndarray) -> torch.Tensor:
+    """Convert an RGB HWC image to the CHW float format expected by LeRobot."""
+    image = _validate_image(name, image)
+    return torch.from_numpy(image.copy()).permute(2, 0, 1).float() / 255.0
+
+
 class SmolVLAInference:
     """Load a SmolVLA checkpoint and predict one action at a time."""
 
     def __init__(self, policy_path: str, device: str | None = "auto") -> None:
+        from lerobot.policies import make_pre_post_processors
+        from lerobot.policies.smolvla import SmolVLAPolicy
+
         self.device = _choose_device(device)
         self.policy_path = policy_path
         self.policy = SmolVLAPolicy.from_pretrained(policy_path)
         self.policy.to(self.device)
         self.policy.eval()
+        # The direct processor factory reads the device from the policy config;
+        # unlike the serialized-pipeline path it does not consume overrides.
+        self.policy.config.device = str(self.device)
 
-        self.preprocess, self.postprocess = make_pre_post_processors(
-            policy_cfg=self.policy.config,
-            pretrained_path=policy_path,
-            preprocessor_overrides={
-                "device_processor": {"device": str(self.device)},
-            },
-        )
+        processor_overrides = {
+            "device_processor": {"device": str(self.device)},
+        }
+        try:
+            self.preprocess, self.postprocess = make_pre_post_processors(
+                policy_cfg=self.policy.config,
+                pretrained_path=policy_path,
+                preprocessor_overrides=processor_overrides,
+            )
+        except FileNotFoundError as exc:
+            # Some checkpoints have model/config files but were not exported
+            # with LeRobot's processor JSON files. Build the standard SmolVLA
+            # pipelines directly from the policy config in that case.
+            if "policy_preprocessor.json" not in str(exc):
+                raise
+            self.preprocess, self.postprocess = make_pre_post_processors(
+                policy_cfg=self.policy.config,
+                preprocessor_overrides=processor_overrides,
+            )
         self._validate_model_schema()
 
     def _validate_model_schema(self) -> None:
@@ -108,11 +137,18 @@ class SmolVLAInference:
 
         observation: dict[str, Any] = {
             "task": task,
-            STATE_KEY: state,
-            IMAGE_KEYS[0]: _validate_image(IMAGE_KEYS[0], laptop_image),
-            IMAGE_KEYS[1]: _validate_image(IMAGE_KEYS[1], phone_image),
+            STATE_KEY: torch.from_numpy(state.copy()),
+            IMAGE_KEYS[0]: _image_tensor(IMAGE_KEYS[0], laptop_image),
+            IMAGE_KEYS[1]: _image_tensor(IMAGE_KEYS[1], phone_image),
         }
         processed = self.preprocess(observation)
+        # A checkpoint without serialized processor JSON uses the direct
+        # factory fallback; make the final device placement explicit for every
+        # tensor, including tokenized language inputs.
+        processed = {
+            key: value.to(self.device) if isinstance(value, torch.Tensor) else value
+            for key, value in processed.items()
+        }
         action = self.postprocess(self.policy.select_action(processed))
         if isinstance(action, torch.Tensor):
             action = action.detach().cpu().numpy()
