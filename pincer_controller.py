@@ -128,19 +128,16 @@ class PincerController:
     def apply_delta(self, action: np.ndarray) -> None:
         """Apply [dx, dy, dz, dRx, dRy, dRz, d_distance] deltas."""
         action = np.asarray(action, dtype=np.float64).reshape(-1)
-        if action.size < 6:
-            raise ValueError("Pincer action must contain at least 6 pose values")
+        if action.size != 7:
+            raise ValueError(f"Pincer action must contain 7 pose values, not {action.size}")
         self.target_position += np.clip(action[:3], -0.05, 0.05)
         self.target_quat = self._quat_mul(self.target_quat, self._rotvec_to_quat(np.clip(action[3:6], -0.2, 0.2)))
         self.data.qpos[self.object_qpos_id:self.object_qpos_id + 3] = self.target_position
         self.data.qpos[self.object_qpos_id + 3:self.object_qpos_id + 7] = self.target_quat
-        if action.size >= 7:
-            self.target_distance = float(np.clip(self.target_distance + np.clip(action[6], -0.02, 0.02), *self.distance_range))
-            self.data.ctrl[self.actuator_id] = self.target_distance
+        self.target_distance = float(np.clip(self.target_distance + np.clip(action[6], -0.02, 0.02), *self.distance_range))
+        self.data.ctrl[self.actuator_id] = self.target_distance
         mujoco.mj_forward(self.model, self.data)
 
-    
-    
     def hold_pose(self) -> None:
         """Keep the free cube-pair pose at the commanded end-effector pose."""
         self.data.qpos[self.object_qpos_id:self.object_qpos_id + 3] = self.target_position
@@ -159,8 +156,6 @@ class PincerController:
             aw * bz + ax * by - ay * bx + az * bw
         ])
 
-    
-    
     @staticmethod
     def _rotvec_to_quat(rotvec: np.ndarray) -> np.ndarray:
         angle = float(np.linalg.norm(rotvec))
