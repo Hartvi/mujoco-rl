@@ -141,6 +141,13 @@ class PincerController:
 
     
     
+    def hold_pose(self) -> None:
+        """Keep the free cube-pair pose at the commanded end-effector pose."""
+        self.data.qpos[self.object_qpos_id:self.object_qpos_id + 3] = self.target_position
+        self.data.qpos[self.object_qpos_id + 3:self.object_qpos_id + 7] = self.target_quat
+        self.data.qvel[self.model.jnt_dofadr[self.object_joint_id]:self.model.jnt_dofadr[self.object_joint_id] + 6] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+
     @staticmethod
     def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         aw, ax, ay, az = a
