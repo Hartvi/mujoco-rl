@@ -212,11 +212,14 @@ class BowlingEnv(gym.Env):
         truncated = self._step_count >= self.max_steps
         pin_distance = self._relevant_pin_distance(fallen)
         distance_reward = -pin_distance
+        # Rewards must be scalar. Penalize rotation magnitude so clockwise and
+        # counter-clockwise commands are treated equally.
+        rotation_reward = -float(np.linalg.norm(action[3:6]))
         newly_fallen = max(0, fallen - self._previous_fallen)
         fallen_reward = float(newly_fallen)
         self._previous_fallen = fallen
         open_close_reward = -10 * pin_distance * abs(float(action[6]))
-        reward = distance_reward + fallen_reward + open_close_reward
+        reward = distance_reward + fallen_reward + open_close_reward + rotation_reward
         if self.render_mode == "human":
             self.render()
         return self._get_observation(), reward, terminated, truncated, {
@@ -225,6 +228,7 @@ class BowlingEnv(gym.Env):
             "success": terminated,
             "task": self.task,
             "reward.distance": distance_reward,
+            "reward.rotation": rotation_reward,
             "reward.fallen_pins": fallen_reward,
             "reward.open_close": open_close_reward,
             "distance.relevant_pin": pin_distance,

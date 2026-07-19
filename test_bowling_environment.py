@@ -130,6 +130,27 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
+    def test_rotation_reward_is_a_direction_independent_scalar_penalty(self) -> None:
+        env = BowlingEnv()
+        try:
+            env.reset()
+            positive_action = np.zeros(7, dtype=np.float32)
+            positive_action[3:6] = env.action_space.high[3:6]
+            _, positive_reward, _, _, positive_info = env.step(positive_action)
+
+            env.reset()
+            negative_action = -positive_action
+            _, negative_reward, _, _, negative_info = env.step(negative_action)
+
+            expected = -float(np.linalg.norm(positive_action[3:6]))
+            self.assertIsInstance(positive_reward, float)
+            self.assertIsInstance(positive_info["reward.rotation"], float)
+            self.assertAlmostEqual(positive_info["reward.rotation"], expected)
+            self.assertAlmostEqual(negative_info["reward.rotation"], expected)
+            self.assertTrue(np.isscalar(negative_reward))
+        finally:
+            env.close()
+
     def test_success_is_termination_not_truncation(self) -> None:
         env = BowlingEnv(max_steps=5)
         action = np.zeros(7, dtype=np.float32)

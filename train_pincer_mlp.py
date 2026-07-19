@@ -8,7 +8,7 @@ from pincer_mlp import PincerMLP
 def train(args):
     env = BowlingEnv(render_mode="human" if args.render else None, max_steps=args.episode_max_steps)
     log_file = open(args.log_file, "w", newline="")
-    log_writer = csv.DictWriter(log_file, fieldnames=["update", "mean_reward", "distance_reward", "fallen_reward", "open_close_reward", "mean_pin_distance", "max_fallen_pins"])
+    log_writer = csv.DictWriter(log_file, fieldnames=["update", "mean_reward", "distance_reward", "fallen_reward", "open_close_reward", "rotation_reward", "mean_pin_distance", "max_fallen_pins"])
     log_writer.writeheader()
     device = torch.device(args.device)
     model = PincerMLP(observation_dim=env.observation_space["observation.state"].shape[0], action_low=env.action_space.low, action_high=env.action_space.high).to(device)
@@ -19,6 +19,7 @@ def train(args):
     for update in range(args.updates):
         states, raw_actions, old_log_probs, rewards, dones, values = [], [], [], [], [], []
         distance_rewards, fallen_rewards, open_close_rewards, pin_distances, fallen_counts = [], [], [], [], []
+        rotation_rewards = []
 
         for step in range(args.horizon):
             state = torch.as_tensor(model.flatten_observation(observation), dtype=torch.float32, device=device).unsqueeze(0)
@@ -38,6 +39,7 @@ def train(args):
             distance_rewards.append(info["reward.distance"])
             fallen_rewards.append(info["reward.fallen_pins"])
             open_close_rewards.append(info["reward.open_close"])
+            rotation_rewards.append(info["reward.rotation"])
             pin_distances.append(info["distance.relevant_pin"])
             fallen_counts.append(info["fallen_pins"])
             states.append(state[0].cpu()); raw_actions.append(raw[0].cpu()); old_log_probs.append(log_prob[0].cpu())
@@ -68,7 +70,7 @@ def train(args):
                 optimizer.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step()
 
         mean_reward = float(rewards.mean().item())
-        log_writer.writerow({"update": update, "mean_reward": mean_reward, "distance_reward": float(sum(distance_rewards) / len(distance_rewards)), "fallen_reward": float(sum(fallen_rewards) / len(fallen_rewards)), "open_close_reward": float(sum(open_close_rewards) / len(open_close_rewards)), "mean_pin_distance": float(sum(pin_distances) / len(pin_distances)), "max_fallen_pins": max(fallen_counts)})
+        log_writer.writerow({"update": update, "mean_reward": mean_reward, "distance_reward": float(sum(distance_rewards) / len(distance_rewards)), "fallen_reward": float(sum(fallen_rewards) / len(fallen_rewards)), "open_close_reward": float(sum(open_close_rewards) / len(open_close_rewards)), "rotation_reward": float(sum(rotation_rewards) / len(rotation_rewards)), "mean_pin_distance": float(sum(pin_distances) / len(pin_distances)), "max_fallen_pins": max(fallen_counts)})
         log_file.flush()
         if (update + 1) % args.print_every == 0 or update == args.updates - 1:
             print(f"[POLICY UPDATED] update={update + 1} mean_reward={mean_reward:.3f} mean_distance={sum(distance_rewards) / len(distance_rewards):.3f} newly_fallen={sum(fallen_rewards):.0f}", flush=True)
