@@ -52,7 +52,7 @@
 ## 5. Replace handwritten PPO with Stable-Baselines3
 
 - [ ] Preserve the current raw trainer temporarily as a reference.
-- [ ] Add a new SB3 training entry point.
+- [x] Add a new SB3 training entry point.
 - [ ] Use `MultiInputPolicy` while observations remain a `Dict`; otherwise use `MlpPolicy`.
 - [ ] Match the desired actor and critic architecture with `policy_kwargs`.
 - [ ] Use `Monitor` for episode metrics.
