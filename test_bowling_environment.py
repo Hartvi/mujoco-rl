@@ -236,14 +236,25 @@ class BowlingEnvironmentTest(unittest.TestCase):
             initial_pin_x = float(env.data.xpos[pin_id, 0])
             forward_action = np.zeros(7, dtype=np.float32)
             forward_action[0] = env.action_space.high[0]
+            max_acceleration = 0.0
 
             for _ in range(130):
                 env.step(forward_action)
+                self.assertTrue(np.all(np.isfinite(env.data.qacc)))
+                max_acceleration = max(
+                    max_acceleration, float(np.max(np.abs(env.data.qacc)))
+                )
 
             self.assertGreater(
                 float(env.data.xpos[pin_id, 0]) - initial_pin_x,
                 0.05,
             )
+            self.assertLess(max_acceleration, 1e5)
+            self.assertTrue(np.all(
+                env.model.dof_damping[
+                    env._ee.object_dof_id:env._ee.object_dof_id + 6
+                ] > 0.0
+            ))
         finally:
             env.close()
 

@@ -59,7 +59,7 @@ def _panda_xml() -> str:
 def _pincer_xml() -> str:
     return """
     <body name="cube_pair" pos="0.3 0 0.05" gravcomp="1">
-      <freejoint name="object_pose"/>
+      <joint name="object_pose" type="free" damping="1"/>
       <geom name="pincer_center_mass" type="box" size="0.01 0.01 0.01" mass="1.0" contype="0" conaffinity="0" rgba="0 0 0 0"/>
       <body name="cube_1_body" pos="-0.01 0 0">
         <geom name="cube_1" type="box" size="0.01 0.01 0.01" mass="0.05" condim="3" rgba="0.2 0.5 0.9 1"/>

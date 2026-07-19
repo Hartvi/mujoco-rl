@@ -9,12 +9,12 @@ class PincerController:
     """Controller for the cube pair pose and actuated distance."""
     DISTANCE_JOINT = "cube_distance"
     DISTANCE_ACTUATOR = "distance_command"
-    POSITION_KP = 500.0
-    POSITION_KD = 40.0
-    MAX_FORCE = 100.0
-    ORIENTATION_KP = 1.0
-    ORIENTATION_KD = 0.1
-    MAX_TORQUE = 0.2
+    POSITION_KP = 200.0
+    POSITION_KD = 20.0
+    MAX_FORCE = 30.0
+    ORIENTATION_KP = 0.2
+    ORIENTATION_KD = 0.03
+    MAX_TORQUE = 0.05
     MAX_LINEAR_SPEED = 0.5  # metres per simulated second
     MAX_ANGULAR_SPEED = 0.5  # radians per simulated second
     MAX_DISTANCE_SPEED = 0.05  # metres per simulated second
