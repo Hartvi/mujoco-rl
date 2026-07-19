@@ -35,8 +35,8 @@ class BowlingEnv(gym.Env):
         self._pin_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}") for i in range(1, num_pins + 1)]
 
         self.action_space = spaces.Box(
-            low=np.array([-0.001] * 3 + [-0.2] * 3 + [-0.02], dtype=np.float32),
-            high=np.array([0.001] * 3 + [0.2] * 3 + [0.02], dtype=np.float32),
+            low=np.array([-0.001] * 3 + [-0.01] * 3 + [-0.001], dtype=np.float32),
+            high=np.array([0.001] * 3 + [0.01] * 3 + [0.001], dtype=np.float32),
         )
         self.observation_space = spaces.Dict({
             "observation.state": spaces.Box(-np.inf, np.inf, shape=(8,), dtype=np.float32),

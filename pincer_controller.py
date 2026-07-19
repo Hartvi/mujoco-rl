@@ -5,86 +5,12 @@ import numpy as np
 import mujoco
 
 
-def _pincer_xml(index: int = 0, x: float = 0.0, y: float = 0.0) -> str:
-    return f'''
-<mujoco model="two_cubes_variable_distance">
-  <compiler angle="radian" autolimits="true"/>
-
-  <!-- Disable gravity so the free object remains where it is placed. -->
-  <option timestep="0.002" gravity="0 0 0"/>
-
-  <default>
-    <!-- size contains half-extents, so 0.01 produces a 2 cm cube. -->
-    <geom type="box"
-          size="0.01 0.01 0.01"
-          density="1000"
-          condim="3"/>
-
-    <joint damping="0.2"/>
-  </default>
-
-  <worldbody>
-    <!-- The complete two-cube object has a free 6-DoF pose. -->
-    <body name="cube_pair" pos="0 0 0.05">
-      <freejoint name="object_pose"/>
-
-      <geom name="cube_1"
-            pos="0 0 0"
-            rgba="0.2 0.5 0.9 1"/>
-
-      <!--
-        cube_2 starts 2 cm from cube_1.
-
-        Because:
-          body position = 0.02 m
-          joint reference = 0.02 m
-
-        the joint qpos itself is equal to the centre-to-centre distance.
-      -->
-      <body name="cube_2_body" pos="0.02 0 0">
-        <joint name="cube_distance"
-               type="slide"
-               axis="1 0 0"
-               limited="true"
-               range="0.02 0.12"
-               ref="0.02"/>
-
-        <geom name="cube_2"
-              pos="0 0 0"
-              rgba="0.9 0.3 0.2 1"/>
-      </body>
-    </body>
-  </worldbody>
-
-  <actuator>
-    <!-- ctrl is the desired centre-to-centre distance in metres. -->
-    <position name="distance_command"
-              joint="cube_distance"
-              kp="100"
-              ctrllimited="true"
-              ctrlrange="0.02 0.12"
-              forcelimited="true"
-              forcerange="-20 20"/>
-  </actuator>
-
-  <keyframe>
-    <!--
-      qpos:
-        root position:       0 0 0.05
-        root quaternion:     1 0 0 0
-        cube distance:       0.02
-    -->
-    <key name="touching"
-         qpos="0 0 0.05 1 0 0 0 0.02"/>
-  </keyframe>
-</mujoco>
-'''
-
 class PincerController:
     """Controller for the cube pair pose and actuated distance."""
     DISTANCE_JOINT = "cube_distance"
     DISTANCE_ACTUATOR = "distance_command"
     MAX_LINEAR_SPEED = 0.05  # metres per simulated second
+    MAX_DISTANCE_SPEED = 0.05  # metres per simulated second
     OBJECT_BODY = "cube_pair"
 
     def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, control_dt: float = 0.02):
@@ -92,6 +18,7 @@ class PincerController:
         self.data = data
         self.control_dt = control_dt
         self.max_translation_delta = self.MAX_LINEAR_SPEED * self.control_dt
+        self.max_distance_delta = self.MAX_DISTANCE_SPEED * self.control_dt
         self.body_id = self._name_id(mujoco.mjtObj.mjOBJ_BODY, self.OBJECT_BODY)
         self.object_joint_id = self._name_id(mujoco.mjtObj.mjOBJ_JOINT, "object_pose")
         self.object_qpos_id = int(model.jnt_qposadr[self.object_joint_id])
@@ -136,7 +63,7 @@ class PincerController:
         self.target_quat = self._quat_mul(self.target_quat, self._rotvec_to_quat(np.clip(action[3:6], -0.2, 0.2)))
         self.data.qpos[self.object_qpos_id:self.object_qpos_id + 3] = self.target_position
         self.data.qpos[self.object_qpos_id + 3:self.object_qpos_id + 7] = self.target_quat
-        self.target_distance = float(np.clip(self.target_distance + np.clip(action[6], -0.02, 0.02), *self.distance_range))
+        self.target_distance = float(np.clip(self.target_distance + np.clip(action[6], -self.max_distance_delta, self.max_distance_delta), *self.distance_range))
         self.data.ctrl[self.actuator_id] = self.target_distance
         mujoco.mj_forward(self.model, self.data)
 
@@ -145,6 +72,8 @@ class PincerController:
         self.data.qpos[self.object_qpos_id:self.object_qpos_id + 3] = self.target_position
         self.data.qpos[self.object_qpos_id + 3:self.object_qpos_id + 7] = self.target_quat
         self.data.qvel[self.model.jnt_dofadr[self.object_joint_id]:self.model.jnt_dofadr[self.object_joint_id] + 6] = 0.0
+        self.data.qpos[self.qpos_id] = self.target_distance
+        self.data.qvel[self.model.jnt_dofadr[self.joint_id]] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
     @staticmethod

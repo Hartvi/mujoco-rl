@@ -58,12 +58,15 @@ def _panda_xml() -> str:
 
 def _pincer_xml() -> str:
     return """
-    <body name="cube_pair" pos="-2 0 0.05" gravcomp="1">
+    <body name="cube_pair" pos="0.3 0 0.05" gravcomp="1">
       <freejoint name="object_pose"/>
-      <geom name="cube_1" type="box" size="0.01 0.01 0.01" density="1000" condim="3" rgba="0.2 0.5 0.9 1"/>
-      <body name="cube_2_body" pos="0.02 0 0">
+      <geom name="pincer_center_mass" type="box" size="0.01 0.01 0.01" mass="0.008" contype="0" conaffinity="0" rgba="0 0 0 0"/>
+      <body name="cube_1_body" pos="-0.01 0 0">
+        <geom name="cube_1" type="box" size="0.01 0.01 0.01" mass="0.000001" condim="3" rgba="0.2 0.5 0.9 1"/>
+      </body>
+      <body name="cube_2_body" pos="0.01 0 0">
         <joint name="cube_distance" type="slide" axis="1 0 0" limited="true" range="0.02 0.12" ref="0.02" damping="0.2"/>
-        <geom name="cube_2" type="box" size="0.01 0.01 0.01" density="1000" condim="3" rgba="0.9 0.3 0.2 1"/>
+        <geom name="cube_2" type="box" size="0.01 0.01 0.01" mass="0.000001" condim="3" rgba="0.9 0.3 0.2 1"/>
       </body>
     </body>
     """
@@ -99,6 +102,10 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
     {pins}
     {_pincer_xml() if include_pincer else _panda_xml()}
   </worldbody>
+  <contact>
+    <exclude body1="cube_pair" body2="cube_2_body"/>
+  </contact>
+
   <actuator>
     {((''.join(f'<position name="panda_motor{i}" joint="panda_joint{i}" kp="150" kv="20" ctrlrange="-2.9 2.9"/>' for i in range(1, 8)) + '<position name="panda_finger_motor1" joint="panda_finger_joint1" kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>') if not include_pincer else '<position name="distance_command" joint="cube_distance" kp="100" ctrllimited="true" ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>')}
   </actuator>
