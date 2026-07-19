@@ -5,9 +5,11 @@ import torch
 from torch import nn
 from torch.distributions import Normal
 
+
 class PincerMLP(nn.Module):
-    """Actor-critic MLP for BowlingEnv's 7D state and action spaces."""
-    def __init__(self, observation_dim=8, action_dim=7, hidden_dim=256, action_low=None, action_high=None):
+    """Actor-critic MLP for the pincer and fixed-order pin state."""
+
+    def __init__(self, observation_dim=148, action_dim=7, hidden_dim=256, action_low=None, action_high=None):
         super().__init__()
         self.actor = nn.Sequential(nn.Linear(observation_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, action_dim))
         self.critic = nn.Sequential(nn.Linear(observation_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, 1))
@@ -24,7 +26,8 @@ class PincerMLP(nn.Module):
         return np.asarray(observation, dtype=np.float32).reshape(-1)
 
     def distribution(self, state):
-        return Normal(self.actor(state), self.log_std.exp().expand_as(self.actor(state)))
+        mean = self.actor(state)
+        return Normal(mean, self.log_std.exp().expand_as(mean))
 
     def value(self, state):
         return self.critic(state).squeeze(-1)

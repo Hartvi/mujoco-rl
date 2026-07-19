@@ -14,6 +14,7 @@ def train(args):
     model = PincerMLP(observation_dim=env.observation_space["observation.state"].shape[0], action_low=env.action_space.low, action_high=env.action_space.high).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     observation, _ = env.reset(seed=args.seed)
+    total_steps = 0
 
     for update in range(args.updates):
         states, raw_actions, old_log_probs, rewards, dones, values = [], [], [], [], [], []
@@ -25,8 +26,15 @@ def train(args):
                 action, log_prob, value, raw = model.action_and_value(state)
             env_action = action[0].cpu().numpy()
             observation, reward, terminated, truncated, info = env.step(env_action)
-            if args.log_actions and (step % args.log_every == 0):
-                print(f"step={step} action={env_action} state={observation['observation.state']} reward={reward:.3f} fallen={info['fallen_pins']}", flush=True)
+            total_steps += 1
+            if args.log_actions and (total_steps % args.log_every == 0):
+                pincer_state = observation["observation.state"][:8]
+                print(
+                    f"[ACTION] step={total_steps} action={env_action.round(3)} "
+                    f"pincer={pincer_state.round(3)} reward={reward:.3f} "
+                    f"fallen={info['fallen_pins']}",
+                    flush=True,
+                )
             distance_rewards.append(info["reward.distance"])
             fallen_rewards.append(info["reward.fallen_pins"])
             open_close_rewards.append(info["reward.open_close"])
@@ -62,8 +70,8 @@ def train(args):
         mean_reward = float(rewards.mean().item())
         log_writer.writerow({"update": update, "mean_reward": mean_reward, "distance_reward": float(sum(distance_rewards) / len(distance_rewards)), "fallen_reward": float(sum(fallen_rewards) / len(fallen_rewards)), "open_close_reward": float(sum(open_close_rewards) / len(open_close_rewards)), "mean_pin_distance": float(sum(pin_distances) / len(pin_distances)), "max_fallen_pins": max(fallen_counts)})
         log_file.flush()
-        if update % args.print_every == 0:
-            print(f"[POLICY UPDATED] update={update} mean_reward={mean_reward:.3f} mean_distance={sum(distance_rewards) / len(distance_rewards):.3f} newly_fallen={sum(fallen_rewards):.0f}", flush=True)
+        if (update + 1) % args.print_every == 0 or update == args.updates - 1:
+            print(f"[POLICY UPDATED] update={update + 1} mean_reward={mean_reward:.3f} mean_distance={sum(distance_rewards) / len(distance_rewards):.3f} newly_fallen={sum(fallen_rewards):.0f}", flush=True)
             model.save(args.checkpoint)
     log_file.close()
     env.close(); model.save(args.checkpoint)
@@ -75,7 +83,7 @@ def main():
     p.add_argument("--learning-rate", type=float, default=3e-4); p.add_argument("--gamma", type=float, default=.99)
     p.add_argument("--gae-lambda", type=float, default=.95); p.add_argument("--clip", type=float, default=.2)
     p.add_argument("--value-coef", type=float, default=.5); p.add_argument("--checkpoint", default="pincer_mlp.pt")
-    p.add_argument("--device", default="cuda"); p.add_argument("--seed", type=int, default=0); p.add_argument("--print-every", type=int, default=10); p.add_argument("--render", action="store_true", help="show the MuJoCo viewer during training"); p.add_argument("--log-actions", action="store_true", help="print actions and states"); p.add_argument("--log-every", type=int, default=1); p.add_argument("--log-file", default="training_rewards.csv", help="CSV file for reward metrics")
+    p.add_argument("--device", default="cuda"); p.add_argument("--seed", type=int, default=0); p.add_argument("--print-every", type=int, default=10); p.add_argument("--render", action="store_true", help="show the MuJoCo viewer during training"); p.add_argument("--log-actions", action="store_true", help="periodically print compact action and pincer state summaries"); p.add_argument("--log-every", type=int, default=500, help="simulator steps between optional action logs"); p.add_argument("--log-file", default="training_rewards.csv", help="CSV file for reward metrics")
     train(p.parse_args())
 
 if __name__ == "__main__":

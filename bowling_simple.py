@@ -17,10 +17,15 @@ from pincer_controller import PincerController
 class BowlingEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
     FRAME_SKIP = 10
+    PINCER_STATE_SIZE = 8
+    PIN_STATE_SIZE = 14
+    MAX_PINS = 10
 
     def __init__(self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10):
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
+        if not 1 <= num_pins <= self.MAX_PINS:
+            raise ValueError(f"num_pins must be between 1 and {self.MAX_PINS}")
         self.render_mode = render_mode
         self.max_steps = max_steps
         self.num_pins = num_pins
@@ -35,24 +40,50 @@ class BowlingEnv(gym.Env):
         self.task = "bowl the pins with the pincer"
         self.control_dt = float(self.model.opt.timestep * self.FRAME_SKIP)
         self._ee = PincerController(self.model, self.data, control_dt=self.control_dt)
-        self._pin_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}") for i in range(1, num_pins + 1)]
+        self._pin_ids = [
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}")
+            for i in range(1, num_pins + 1)
+        ]
 
         self.action_space = spaces.Box(
-            low=np.array([-self._ee.max_translation_delta] * 3 + [-self._ee.max_rotation_delta] * 3 + [-self._ee.max_distance_delta], dtype=np.float32),
-            high=np.array([self._ee.max_translation_delta] * 3 + [self._ee.max_rotation_delta] * 3 + [self._ee.max_distance_delta], dtype=np.float32),
+            low=np.array(
+                [-self._ee.max_translation_delta] * 3
+                + [-self._ee.max_rotation_delta] * 3
+                + [-self._ee.max_distance_delta],
+                dtype=np.float32,
+            ),
+            high=np.array(
+                [self._ee.max_translation_delta] * 3
+                + [self._ee.max_rotation_delta] * 3
+                + [self._ee.max_distance_delta],
+                dtype=np.float32,
+            ),
         )
+        observation_size = self.PINCER_STATE_SIZE + self.PIN_STATE_SIZE * num_pins
         self.observation_space = spaces.Dict({
-            "observation.state": spaces.Box(-np.inf, np.inf, shape=(8,), dtype=np.float32),
+            "observation.state": spaces.Box(
+                -np.inf, np.inf, shape=(observation_size,), dtype=np.float32
+            ),
         })
 
     def _fallen_pins(self) -> int:
-        return sum(float(self.data.xmat[body_id].reshape(3, 3)[2, 2]) < 0.75 for body_id in self._pin_ids)
+        return sum(
+            float(self.data.xmat[body_id].reshape(3, 3)[2, 2]) < 0.75
+            for body_id in self._pin_ids
+        )
 
     def _relevant_pin_distance(self, fallen: int) -> float:
         pincer_position = self.data.xpos[self._ee.body_id]
         pin_positions = np.asarray([self.data.xpos[body_id] for body_id in self._pin_ids])
-        fallen_mask = np.asarray([self.data.xmat[body_id].reshape(3, 3)[2, 2] < 0.75 for body_id in self._pin_ids])
-        candidates = pin_positions[fallen_mask] if fallen and np.any(fallen_mask) else pin_positions
+        fallen_mask = np.asarray([
+            self.data.xmat[body_id].reshape(3, 3)[2, 2] < 0.75
+            for body_id in self._pin_ids
+        ])
+        candidates = (
+            pin_positions[fallen_mask]
+            if fallen and np.any(fallen_mask)
+            else pin_positions
+        )
         return float(np.min(np.linalg.norm(candidates - pincer_position, axis=1)))
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
@@ -68,8 +99,101 @@ class BowlingEnv(gym.Env):
         self._last_action_dt = 0.0
         return self._get_observation(), {"fallen_pins": 0, "task": self.task}
 
+    def _body_velocity(self, body_id: int) -> np.ndarray:
+        velocity = np.zeros(6, dtype=np.float64)
+        mujoco.mj_objectVelocity(
+            self.model,
+            self.data,
+            mujoco.mjtObj.mjOBJ_BODY,
+            body_id,
+            velocity,
+            0,
+        )
+        return velocity
+
+    @staticmethod
+    def _quat_conjugate(quat: np.ndarray) -> np.ndarray:
+        return np.array([quat[0], -quat[1], -quat[2], -quat[3]])
+
+    @staticmethod
+    def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        aw, ax, ay, az = a
+        bw, bx, by, bz = b
+        return np.array([
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ])
+
+    def _pin_observation(
+        self,
+        body_id: int,
+        pincer_position: np.ndarray,
+        world_to_pincer: np.ndarray,
+        pincer_quat: np.ndarray,
+        pincer_velocity: np.ndarray,
+    ) -> np.ndarray:
+        relative_position = world_to_pincer @ (
+            self.data.xpos[body_id] - pincer_position
+        )
+        relative_quat = self._quat_mul(
+            self._quat_conjugate(pincer_quat),
+            self.data.xquat[body_id],
+        )
+        if relative_quat[0] < 0.0:
+            relative_quat *= -1.0
+
+        pin_velocity = self._body_velocity(body_id)
+        relative_angular_velocity = world_to_pincer @ (
+            pin_velocity[:3] - pincer_velocity[:3]
+        )
+        relative_linear_velocity = world_to_pincer @ (
+            pin_velocity[3:]
+            - pincer_velocity[3:]
+            - np.cross(
+                pincer_velocity[:3],
+                self.data.xpos[body_id] - pincer_position,
+            )
+        )
+        fallen = float(self.data.xmat[body_id].reshape(3, 3)[2, 2] < 0.75)
+
+        # Per-pin layout: relative position (3), relative quaternion (4),
+        # fallen flag (1), relative linear velocity (3), relative angular
+        # velocity (3).
+        return np.concatenate((
+            relative_position,
+            relative_quat,
+            [fallen],
+            relative_linear_velocity,
+            relative_angular_velocity,
+        ))
+
     def _get_observation(self) -> dict[str, np.ndarray]:
-        return {"observation.state": np.concatenate((self._ee.observation(), [self._last_action_dt])).astype(np.float32)}
+        pincer_state = np.concatenate((
+            self._ee.observation(),
+            [self._last_action_dt],
+        ))
+        pincer_position = self.data.xpos[self._ee.body_id]
+        pincer_rotation = self.data.xmat[self._ee.body_id].reshape(3, 3)
+        world_to_pincer = pincer_rotation.T
+        pincer_quat = self.data.xquat[self._ee.body_id]
+        pincer_velocity = self._body_velocity(self._ee.body_id)
+        pin_states = [
+            self._pin_observation(
+                body_id,
+                pincer_position,
+                world_to_pincer,
+                pincer_quat,
+                pincer_velocity,
+            )
+            for body_id in self._pin_ids
+        ]
+        return {
+            "observation.state": np.concatenate(
+                (pincer_state, *pin_states)
+            ).astype(np.float32)
+        }
 
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float64)
@@ -96,7 +220,10 @@ class BowlingEnv(gym.Env):
         if self.render_mode == "human":
             self.render()
         return self._get_observation(), reward, terminated, truncated, {
-            "fallen_pins": fallen, "newly_fallen": newly_fallen, "success": terminated, "task": self.task,
+            "fallen_pins": fallen,
+            "newly_fallen": newly_fallen,
+            "success": terminated,
+            "task": self.task,
             "reward.distance": distance_reward,
             "reward.fallen_pins": fallen_reward,
             "reward.open_close": open_close_reward,

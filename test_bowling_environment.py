@@ -55,6 +55,67 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
+    def test_observation_contains_fixed_order_pin_state(self) -> None:
+        env = BowlingEnv()
+        try:
+            observation, _ = env.reset()
+            state = observation["observation.state"]
+            self.assertEqual(state.shape, (148,))
+            pincer_position = env.data.xpos[env._ee.body_id]
+            world_to_pincer = env.data.xmat[env._ee.body_id].reshape(3, 3).T
+            for index, body_id in enumerate(env._pin_ids):
+                start = env.PINCER_STATE_SIZE + index * env.PIN_STATE_SIZE
+                pin_state = state[start:start + env.PIN_STATE_SIZE]
+                expected_position = world_to_pincer @ (env.data.xpos[body_id] - pincer_position)
+                np.testing.assert_allclose(pin_state[:3], expected_position, atol=1e-7)
+                np.testing.assert_allclose(pin_state[3:7], [1.0, 0.0, 0.0, 0.0], atol=1e-7)
+                self.assertEqual(pin_state[7], 0.0)
+                np.testing.assert_allclose(pin_state[8:14], 0.0, atol=1e-7)
+        finally:
+            env.close()
+
+    def test_pin_velocities_are_relative_to_pincer(self) -> None:
+        env = BowlingEnv()
+        try:
+            env.reset()
+            pincer_dof = int(env.model.jnt_dofadr[env._ee.object_joint_id])
+            pin_joint = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, "pin_1_free")
+            pin_dof = int(env.model.jnt_dofadr[pin_joint])
+            env.data.qvel[pincer_dof:pincer_dof + 6] = [0.25, 0.5, 0.75, 1.0, 1.0, 1.0]
+            env.data.qvel[pin_dof:pin_dof + 6] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+            mujoco.mj_forward(env.model, env.data)
+            state = env._get_observation()["observation.state"]
+            start = env.PINCER_STATE_SIZE
+            pincer_velocity = env._body_velocity(env._ee.body_id)
+            pin_velocity = env._body_velocity(env._pin_ids[0])
+            relative_position = env.data.xpos[env._pin_ids[0]] - env.data.xpos[env._ee.body_id]
+            expected_linear = pin_velocity[3:] - pincer_velocity[3:] - np.cross(pincer_velocity[:3], relative_position)
+            expected_angular = pin_velocity[:3] - pincer_velocity[:3]
+            np.testing.assert_allclose(state[start + 8:start + 11], expected_linear, atol=1e-7)
+            np.testing.assert_allclose(state[start + 11:start + 14], expected_angular, atol=1e-7)
+        finally:
+            env.close()
+
+    def test_pin_fallen_flag_updates_in_its_fixed_block(self) -> None:
+        env = BowlingEnv()
+        try:
+            env.reset()
+            pin_index = 2
+            joint_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, f"pin_{pin_index + 1}_free")
+            qpos_adr = int(env.model.jnt_qposadr[joint_id])
+            env.data.qpos[qpos_adr + 3:qpos_adr + 7] = [np.sqrt(0.5), np.sqrt(0.5), 0.0, 0.0]
+            mujoco.mj_forward(env.model, env.data)
+            state = env._get_observation()["observation.state"]
+            start = env.PINCER_STATE_SIZE + pin_index * env.PIN_STATE_SIZE
+            self.assertEqual(state[start + 7], 1.0)
+            for other_index in range(env.num_pins):
+                if other_index == pin_index:
+                    continue
+                other_start = env.PINCER_STATE_SIZE + other_index * env.PIN_STATE_SIZE
+                self.assertEqual(state[other_start + 7], 0.0)
+        finally:
+            env.close()
+
     def test_timeout_is_truncation_not_termination(self) -> None:
         env = BowlingEnv(max_steps=2)
         action = np.zeros(7, dtype=np.float32)

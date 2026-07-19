@@ -12,16 +12,16 @@
 
 ## 2. Improve the observation
 
-- [ ] Add enough pin state to make the task observable:
+- [x] Add enough pin state to make the task observable:
   - pin positions relative to the pincer;
-  - pin orientation or upright-axis value;
+  - pin orientation;
   - fallen/upright flags;
-  - optionally pin linear and angular velocities.
-- [ ] Decide between all-pin observations and a compact representation such as nearest upright pin plus global fallen count.
-- [ ] Keep pincer position, orientation, opening, and action delta time.
-- [ ] Use fixed ordering and fixed dimensions for every pin.
-- [ ] Normalize observations or use SB3 `VecNormalize`.
-- [ ] Remove delta time if the control interval remains constant and it provides no useful information.
+  - pin linear and angular velocities relative to the pincer.
+- [x] Use all-pin observations in fixed pin_1 through pin_10 order.
+- [x] Keep pincer position, orientation, opening, and action delta time.
+- [x] Use fixed ordering and fixed dimensions for every pin.
+- [ ] Normalize observations with SB3 `VecNormalize` during the SB3 rewrite.
+- [x] Retain delta time for future variable-rate control.
 
 ## 3. Redesign and test the reward
 
