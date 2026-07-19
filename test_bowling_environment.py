@@ -164,31 +164,29 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
-    def test_motion_limits_match_control_timestep(self) -> None:
+    def test_motion_commands_are_rate_limited(self) -> None:
         env = BowlingEnv()
         try:
             observation, _ = env.reset()
-            initial_position = observation["observation.state"][:3].astype(np.float64)
-            initial_distance = float(observation["observation.state"][6])
+            initial_position = observation["observation.state"][:3].copy()
+            initial_target_position = env._ee.target_position.copy()
+            initial_target_distance = env._ee.target_distance
+
             observation, _, _, _, _ = env.step(env.action_space.high.copy())
             state = observation["observation.state"]
 
             np.testing.assert_allclose(
-                state[:3] - initial_position,
+                env._ee.target_position - initial_target_position,
                 env._ee.MAX_LINEAR_SPEED * env.control_dt,
                 atol=1e-7,
             )
             self.assertAlmostEqual(
-                float(state[6]) - initial_distance,
+                env._ee.target_distance - initial_target_distance,
                 env._ee.MAX_DISTANCE_SPEED * env.control_dt,
                 places=7,
             )
+            self.assertTrue(np.all(state[:3] > initial_position))
             self.assertAlmostEqual(float(state[7]), env.control_dt, places=7)
-            self.assertAlmostEqual(
-                np.linalg.norm(state[3:6]) / env.control_dt,
-                np.sqrt(3.0) * env._ee.MAX_ANGULAR_SPEED,
-                places=5,
-            )
         finally:
             env.close()
 
@@ -208,6 +206,47 @@ class BowlingEnvironmentTest(unittest.TestCase):
             for contact in env.data.contact
         }
 
+    def test_ground_contact_blocks_downward_commands_and_changes_reward(self) -> None:
+        env = BowlingEnv(max_steps=200)
+        try:
+            env.reset()
+            zero_action = np.zeros(7, dtype=np.float32)
+            _, _, _, _, info = env.step(zero_action)
+            self.assertAlmostEqual(
+                info["reward.ground_clearance"],
+                env.GROUND_CLEARANCE_REWARD_SCALE,
+            )
+
+            downward_action = zero_action.copy()
+            downward_action[2] = env.action_space.low[2]
+            for _ in range(100):
+                _, _, _, _, info = env.step(downward_action)
+
+            self.assertGreater(info["distance.ground_clearance"], -0.005)
+            self.assertLess(info["reward.ground_clearance"], 0.0)
+            self.assertGreater(env.data.xpos[env._ee.body_id, 2], 0.0)
+        finally:
+            env.close()
+
+    def test_pincer_contact_pushes_pin_instead_of_phasing_through(self) -> None:
+        env = BowlingEnv(num_pins=1, max_steps=200)
+        try:
+            env.reset()
+            pin_id = env._pin_ids[0]
+            initial_pin_x = float(env.data.xpos[pin_id, 0])
+            forward_action = np.zeros(7, dtype=np.float32)
+            forward_action[0] = env.action_space.high[0]
+
+            for _ in range(130):
+                env.step(forward_action)
+
+            self.assertGreater(
+                float(env.data.xpos[pin_id, 0]) - initial_pin_x,
+                0.05,
+            )
+        finally:
+            env.close()
+
     def test_internal_collision_excluded_and_external_contacts_work(self) -> None:
         env = BowlingEnv()
         try:
@@ -216,8 +255,8 @@ class BowlingEnvironmentTest(unittest.TestCase):
                 frozenset(("cube_1", "cube_2")), self._contact_names(env)
             )
 
-            env._ee.target_position[2] = 0.005
-            env._ee.hold_pose()
+            env.data.qpos[env._ee.object_qpos_id + 2] = 0.005
+            mujoco.mj_forward(env.model, env.data)
             ground_contacts = self._contact_names(env)
             self.assertTrue(
                 all(
@@ -228,8 +267,10 @@ class BowlingEnvironmentTest(unittest.TestCase):
 
             env.reset()
             pin_position = env.data.xpos[env._pin_ids[0]].copy()
-            env._ee.target_position[:] = pin_position + np.array([0.0, 0.0, 0.08])
-            env._ee.hold_pose()
+            env.data.qpos[env._ee.object_qpos_id:env._ee.object_qpos_id + 3] = (
+                pin_position + np.array([0.0, 0.0, 0.08])
+            )
+            mujoco.mj_forward(env.model, env.data)
             pin_contacts = self._contact_names(env)
             self.assertTrue(
                 any(

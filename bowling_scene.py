@@ -6,11 +6,11 @@ def _pin_xml(index: int, x: float, y: float) -> str:
     return f'''
     <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08">
       <freejoint name="pin_{index}_free"/>
-      <geom name="pin_{index}_base" type="cylinder" size="0.115 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1"/>
-      <geom name="pin_{index}_body" type="capsule" size="0.105 0.20" pos="0 0 0.32" rgba="0.92 0.92 0.94 1"/>
-      <geom name="pin_{index}_neck" type="cylinder" size="0.065 0.055" pos="0 0 0.55" rgba="0.92 0.92 0.94 1"/>
-      <geom name="pin_{index}_head" type="sphere" size="0.075" pos="0 0 0.64" rgba="0.92 0.92 0.94 1"/>
-      <geom name="pin_{index}_stripe" type="cylinder" size="0.068 0.012" pos="0 0 0.555" rgba="0.82 0.05 0.04 1" contype="0" conaffinity="0"/>
+      <geom name="pin_{index}_base" type="cylinder" size="0.055 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_body" type="capsule" size="0.05 0.20" pos="0 0 0.32" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_neck" type="cylinder" size="0.025 0.055" pos="0 0 0.55" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_head" type="sphere" size="0.035" pos="0 0 0.64" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_stripe" type="cylinder" size="0.03 0.012" pos="0 0 0.555" rgba="0.82 0.05 0.04 1" contype="0" conaffinity="0" density="50"/>
     </body>'''
 
 
@@ -60,13 +60,13 @@ def _pincer_xml() -> str:
     return """
     <body name="cube_pair" pos="0.3 0 0.05" gravcomp="1">
       <freejoint name="object_pose"/>
-      <geom name="pincer_center_mass" type="box" size="0.01 0.01 0.01" mass="0.008" contype="0" conaffinity="0" rgba="0 0 0 0"/>
+      <geom name="pincer_center_mass" type="box" size="0.01 0.01 0.01" mass="1.0" contype="0" conaffinity="0" rgba="0 0 0 0"/>
       <body name="cube_1_body" pos="-0.01 0 0">
-        <geom name="cube_1" type="box" size="0.01 0.01 0.01" mass="0.000001" condim="3" rgba="0.2 0.5 0.9 1"/>
+        <geom name="cube_1" type="box" size="0.01 0.01 0.01" mass="0.05" condim="3" rgba="0.2 0.5 0.9 1"/>
       </body>
       <body name="cube_2_body" pos="0.01 0 0">
         <joint name="cube_distance" type="slide" axis="1 0 0" limited="true" range="0.02 0.12" ref="0.02" damping="0.2"/>
-        <geom name="cube_2" type="box" size="0.01 0.01 0.01" mass="0.000001" condim="3" rgba="0.9 0.3 0.2 1"/>
+        <geom name="cube_2" type="box" size="0.01 0.01 0.01" mass="0.05" condim="3" rgba="0.9 0.3 0.2 1"/>
       </body>
     </body>
     """
@@ -80,6 +80,10 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
         for column in range(row + 1):
             positions.append((x, (column - row / 2.0) * spacing))
     pins = "\n".join(_pin_xml(i + 1, x, y) for i, (x, y) in enumerate(positions))
+    pincer_constraints = """
+  <contact>
+    <exclude body1="cube_1_body" body2="cube_2_body"/>
+  </contact>""" if include_pincer else ""
     return f'''<mujoco model="bowling_panda">
   <compiler angle="radian" autolimits="true"/>
   <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" iterations="80" solver="Newton"/>
@@ -102,9 +106,7 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
     {pins}
     {_pincer_xml() if include_pincer else _panda_xml()}
   </worldbody>
-  <contact>
-    <exclude body1="cube_1_body" body2="cube_2_body"/>
-  </contact>
+  {pincer_constraints}
 
   <actuator>
     {((''.join(f'<position name="panda_motor{i}" joint="panda_joint{i}" kp="150" kv="20" ctrlrange="-2.9 2.9"/>' for i in range(1, 8)) + '<position name="panda_finger_motor1" joint="panda_finger_joint1" kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>') if not include_pincer else '<position name="distance_command" joint="cube_distance" kp="100" ctrllimited="true" ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>')}

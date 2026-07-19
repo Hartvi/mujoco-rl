@@ -20,6 +20,8 @@ class BowlingEnv(gym.Env):
     PINCER_STATE_SIZE = 8
     PIN_STATE_SIZE = 14
     MAX_PINS = 10
+    GROUND_CLEARANCE_TARGET = 0.02
+    GROUND_CLEARANCE_REWARD_SCALE = 0.1
 
     def __init__(self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10):
         if render_mode not in self.metadata["render_modes"] + [None]:
@@ -43,6 +45,10 @@ class BowlingEnv(gym.Env):
         self._pin_ids = [
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}")
             for i in range(1, num_pins + 1)
+        ]
+        self._cube_geom_ids = [
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            for name in ("cube_1", "cube_2")
         ]
 
         self.action_space = spaces.Box(
@@ -71,6 +77,18 @@ class BowlingEnv(gym.Env):
             float(self.data.xmat[body_id].reshape(3, 3)[2, 2]) < 0.75
             for body_id in self._pin_ids
         )
+
+    def _pincer_ground_clearance(self) -> float:
+        clearances = []
+        for geom_id in self._cube_geom_ids:
+            rotation = self.data.geom_xmat[geom_id].reshape(3, 3)
+            vertical_half_extent = float(
+                np.abs(rotation[2]) @ self.model.geom_size[geom_id]
+            )
+            clearances.append(
+                float(self.data.geom_xpos[geom_id, 2]) - vertical_half_extent
+            )
+        return min(clearances)
 
     def _relevant_pin_distance(self, fallen: int) -> float:
         pincer_position = self.data.xpos[self._ee.body_id]
@@ -202,8 +220,8 @@ class BowlingEnv(gym.Env):
         action_time = float(self.data.time)
         self._ee.apply_delta(action)
         for _ in range(self.FRAME_SKIP):
+            self._ee.hold_pose()
             mujoco.mj_step(self.model, self.data)
-        self._ee.hold_pose()
         self._last_action_dt = float(self.data.time - action_time)
         self._last_action_time = float(self.data.time)
         self._step_count += 1
@@ -212,6 +230,10 @@ class BowlingEnv(gym.Env):
         truncated = self._step_count >= self.max_steps
         pin_distance = self._relevant_pin_distance(fallen)
         distance_reward = -pin_distance
+        ground_clearance = self._pincer_ground_clearance()
+        ground_reward = self.GROUND_CLEARANCE_REWARD_SCALE * float(np.clip(
+            ground_clearance / self.GROUND_CLEARANCE_TARGET, -1.0, 1.0
+        ))
         # Rewards must be scalar. Penalize rotation magnitude so clockwise and
         # counter-clockwise commands are treated equally.
         rotation_reward = -float(np.linalg.norm(action[3:6]))
@@ -219,7 +241,8 @@ class BowlingEnv(gym.Env):
         fallen_reward = float(newly_fallen)
         self._previous_fallen = fallen
         open_close_reward = -10 * pin_distance * abs(float(action[6]))
-        reward = distance_reward + fallen_reward + open_close_reward + rotation_reward
+        reward = (distance_reward + fallen_reward + open_close_reward
+                  + rotation_reward + ground_reward)
         if self.render_mode == "human":
             self.render()
         return self._get_observation(), reward, terminated, truncated, {
@@ -229,9 +252,11 @@ class BowlingEnv(gym.Env):
             "task": self.task,
             "reward.distance": distance_reward,
             "reward.rotation": rotation_reward,
+            "reward.ground_clearance": ground_reward,
             "reward.fallen_pins": fallen_reward,
             "reward.open_close": open_close_reward,
             "distance.relevant_pin": pin_distance,
+            "distance.ground_clearance": ground_clearance,
         }
 
     def _render_camera(self, camera_name: str) -> np.ndarray:
