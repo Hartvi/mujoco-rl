@@ -7,7 +7,7 @@ from pincer_mlp import PincerMLP
 def train(args):
     env = BowlingEnv(render_mode="human" if args.render else None, max_steps=args.horizon)
     device = torch.device(args.device)
-    model = PincerMLP(action_low=env.action_space.low, action_high=env.action_space.high).to(device)
+    model = PincerMLP(observation_dim=env.observation_space["observation.state"].shape[0], action_low=env.action_space.low, action_high=env.action_space.high).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     observation, _ = env.reset(seed=args.seed)
 

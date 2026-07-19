@@ -7,7 +7,7 @@ from torch.distributions import Normal
 
 class PincerMLP(nn.Module):
     """Actor-critic MLP for BowlingEnv's 7D state and action spaces."""
-    def __init__(self, observation_dim=7, action_dim=7, hidden_dim=256, action_low=None, action_high=None):
+    def __init__(self, observation_dim=8, action_dim=7, hidden_dim=256, action_low=None, action_high=None):
         super().__init__()
         self.actor = nn.Sequential(nn.Linear(observation_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, action_dim))
         self.critic = nn.Sequential(nn.Linear(observation_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, 1))

@@ -28,16 +28,18 @@ class BowlingEnv(gym.Env):
         self._viewer: Any = None
         self._renderer: mujoco.Renderer | None = None
         self._step_count = 0
+        self._last_action_time = 0.0
+        self._last_action_dt = 0.0
         self.task = "bowl the pins with the pincer"
         self._ee = PincerController(self.model, self.data)
         self._pin_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}") for i in range(1, num_pins + 1)]
 
         self.action_space = spaces.Box(
-            low=np.array([-0.05] * 3 + [-0.2] * 3 + [-0.02], dtype=np.float32),
-            high=np.array([0.05] * 3 + [0.2] * 3 + [0.02], dtype=np.float32),
+            low=np.array([-0.001] * 3 + [-0.2] * 3 + [-0.02], dtype=np.float32),
+            high=np.array([0.001] * 3 + [0.2] * 3 + [0.02], dtype=np.float32),
         )
         self.observation_space = spaces.Dict({
-            "observation.state": spaces.Box(-np.inf, np.inf, shape=(7,), dtype=np.float32),
+            "observation.state": spaces.Box(-np.inf, np.inf, shape=(8,), dtype=np.float32),
         })
 
     def _fallen_pins(self) -> int:
@@ -51,19 +53,24 @@ class BowlingEnv(gym.Env):
         self._ee.reset()
         mujoco.mj_forward(self.model, self.data)
         self._step_count = 0
+        self._last_action_time = float(self.data.time)
+        self._last_action_dt = 0.0
         return self._get_observation(), {"fallen_pins": 0, "task": self.task}
 
     def _get_observation(self) -> dict[str, np.ndarray]:
-        return {"observation.state": self._ee.observation()}
+        return {"observation.state": np.concatenate((self._ee.observation(), [self._last_action_dt])).astype(np.float32)}
 
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float64)
         if not self.action_space.contains(action.astype(np.float32)):
             raise ValueError(f"Action outside space: {action}")
+        action_time = float(self.data.time)
         self._ee.apply_delta(action)
         for _ in range(10):
             mujoco.mj_step(self.model, self.data)
         self._ee.hold_pose()
+        self._last_action_dt = float(self.data.time - action_time)
+        self._last_action_time = float(self.data.time)
         self._step_count += 1
         fallen = self._fallen_pins()
         terminated = fallen == self.num_pins
