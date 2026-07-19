@@ -6,7 +6,7 @@ from bowling_simple import BowlingEnv
 from pincer_mlp import PincerMLP
 
 def train(args):
-    env = BowlingEnv(render_mode="human" if args.render else None, max_steps=args.horizon)
+    env = BowlingEnv(render_mode="human" if args.render else None, max_steps=args.episode_max_steps)
     log_file = open(args.log_file, "w", newline="")
     log_writer = csv.DictWriter(log_file, fieldnames=["update", "mean_reward", "distance_reward", "fallen_reward", "open_close_reward", "mean_pin_distance", "max_fallen_pins"])
     log_writer.writeheader()
@@ -70,7 +70,7 @@ def train(args):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--updates", type=int, default=1000); p.add_argument("--horizon", type=int, default=512)
+    p.add_argument("--updates", type=int, default=1000); p.add_argument("--horizon", type=int, default=512); p.add_argument("--episode-max-steps", type=int, default=500)
     p.add_argument("--batch-size", type=int, default=128); p.add_argument("--epochs", type=int, default=4)
     p.add_argument("--learning-rate", type=float, default=3e-4); p.add_argument("--gamma", type=float, default=.99)
     p.add_argument("--gae-lambda", type=float, default=.95); p.add_argument("--clip", type=float, default=.2)

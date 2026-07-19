@@ -10,6 +10,7 @@ class PincerController:
     DISTANCE_JOINT = "cube_distance"
     DISTANCE_ACTUATOR = "distance_command"
     MAX_LINEAR_SPEED = 0.05  # metres per simulated second
+    MAX_ANGULAR_SPEED = 0.5  # radians per simulated second
     MAX_DISTANCE_SPEED = 0.05  # metres per simulated second
     OBJECT_BODY = "cube_pair"
 
@@ -18,6 +19,7 @@ class PincerController:
         self.data = data
         self.control_dt = control_dt
         self.max_translation_delta = self.MAX_LINEAR_SPEED * self.control_dt
+        self.max_rotation_delta = self.MAX_ANGULAR_SPEED * self.control_dt
         self.max_distance_delta = self.MAX_DISTANCE_SPEED * self.control_dt
         self.body_id = self._name_id(mujoco.mjtObj.mjOBJ_BODY, self.OBJECT_BODY)
         self.object_joint_id = self._name_id(mujoco.mjtObj.mjOBJ_JOINT, "object_pose")
@@ -60,7 +62,7 @@ class PincerController:
         if action.size != 7:
             raise ValueError(f"Pincer action must contain 7 pose values, not {action.size}")
         self.target_position += np.clip(action[:3], -self.max_translation_delta, self.max_translation_delta)
-        self.target_quat = self._quat_mul(self.target_quat, self._rotvec_to_quat(np.clip(action[3:6], -0.2, 0.2)))
+        self.target_quat = self._quat_mul(self.target_quat, self._rotvec_to_quat(np.clip(action[3:6], -self.max_rotation_delta, self.max_rotation_delta)))
         self.data.qpos[self.object_qpos_id:self.object_qpos_id + 3] = self.target_position
         self.data.qpos[self.object_qpos_id + 3:self.object_qpos_id + 7] = self.target_quat
         self.target_distance = float(np.clip(self.target_distance + np.clip(action[6], -self.max_distance_delta, self.max_distance_delta), *self.distance_range))

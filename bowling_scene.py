@@ -103,7 +103,7 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
     {_pincer_xml() if include_pincer else _panda_xml()}
   </worldbody>
   <contact>
-    <exclude body1="cube_pair" body2="cube_2_body"/>
+    <exclude body1="cube_1_body" body2="cube_2_body"/>
   </contact>
 
   <actuator>

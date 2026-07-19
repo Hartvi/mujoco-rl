@@ -16,6 +16,7 @@ from pincer_controller import PincerController
 
 class BowlingEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
+    FRAME_SKIP = 10
 
     def __init__(self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10):
         if render_mode not in self.metadata["render_modes"] + [None]:
@@ -32,12 +33,13 @@ class BowlingEnv(gym.Env):
         self._last_action_time = 0.0
         self._last_action_dt = 0.0
         self.task = "bowl the pins with the pincer"
-        self._ee = PincerController(self.model, self.data)
+        self.control_dt = float(self.model.opt.timestep * self.FRAME_SKIP)
+        self._ee = PincerController(self.model, self.data, control_dt=self.control_dt)
         self._pin_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}") for i in range(1, num_pins + 1)]
 
         self.action_space = spaces.Box(
-            low=np.array([-0.001] * 3 + [-0.01] * 3 + [-0.001], dtype=np.float32),
-            high=np.array([0.001] * 3 + [0.01] * 3 + [0.001], dtype=np.float32),
+            low=np.array([-self._ee.max_translation_delta] * 3 + [-self._ee.max_rotation_delta] * 3 + [-self._ee.max_distance_delta], dtype=np.float32),
+            high=np.array([self._ee.max_translation_delta] * 3 + [self._ee.max_rotation_delta] * 3 + [self._ee.max_distance_delta], dtype=np.float32),
         )
         self.observation_space = spaces.Dict({
             "observation.state": spaces.Box(-np.inf, np.inf, shape=(8,), dtype=np.float32),
@@ -50,7 +52,7 @@ class BowlingEnv(gym.Env):
         pincer_position = self.data.xpos[self._ee.body_id]
         pin_positions = np.asarray([self.data.xpos[body_id] for body_id in self._pin_ids])
         fallen_mask = np.asarray([self.data.xmat[body_id].reshape(3, 3)[2, 2] < 0.75 for body_id in self._pin_ids])
-        candidates = pin_positions[fallen_mask] if fallen else pin_positions
+        candidates = pin_positions[fallen_mask] if fallen and np.any(fallen_mask) else pin_positions
         return float(np.min(np.linalg.norm(candidates - pincer_position, axis=1)))
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
@@ -75,7 +77,7 @@ class BowlingEnv(gym.Env):
             raise ValueError(f"Action outside space: {action}")
         action_time = float(self.data.time)
         self._ee.apply_delta(action)
-        for _ in range(10):
+        for _ in range(self.FRAME_SKIP):
             mujoco.mj_step(self.model, self.data)
         self._ee.hold_pose()
         self._last_action_dt = float(self.data.time - action_time)
