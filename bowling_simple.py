@@ -28,6 +28,7 @@ class BowlingEnv(gym.Env):
         self._viewer: Any = None
         self._renderer: mujoco.Renderer | None = None
         self._step_count = 0
+        self._previous_fallen = 0
         self._last_action_time = 0.0
         self._last_action_dt = 0.0
         self.task = "bowl the pins with the pincer"
@@ -45,6 +46,13 @@ class BowlingEnv(gym.Env):
     def _fallen_pins(self) -> int:
         return sum(float(self.data.xmat[body_id].reshape(3, 3)[2, 2]) < 0.75 for body_id in self._pin_ids)
 
+    def _relevant_pin_distance(self, fallen: int) -> float:
+        pincer_position = self.data.xpos[self._ee.body_id]
+        pin_positions = np.asarray([self.data.xpos[body_id] for body_id in self._pin_ids])
+        fallen_mask = np.asarray([self.data.xmat[body_id].reshape(3, 3)[2, 2] < 0.75 for body_id in self._pin_ids])
+        candidates = pin_positions[fallen_mask] if fallen else pin_positions
+        return float(np.min(np.linalg.norm(candidates - pincer_position, axis=1)))
+
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
@@ -53,6 +61,7 @@ class BowlingEnv(gym.Env):
         self._ee.reset()
         mujoco.mj_forward(self.model, self.data)
         self._step_count = 0
+        self._previous_fallen = 0
         self._last_action_time = float(self.data.time)
         self._last_action_dt = 0.0
         return self._get_observation(), {"fallen_pins": 0, "task": self.task}
@@ -75,11 +84,21 @@ class BowlingEnv(gym.Env):
         fallen = self._fallen_pins()
         terminated = fallen == self.num_pins
         truncated = self._step_count >= self.max_steps
-        reward = float(fallen) - 0.01 * float(np.dot(action, action))
+        pin_distance = self._relevant_pin_distance(fallen)
+        distance_reward = -pin_distance
+        newly_fallen = max(0, fallen - self._previous_fallen)
+        fallen_reward = float(newly_fallen)
+        self._previous_fallen = fallen
+        open_close_reward = -10 * pin_distance * abs(float(action[6]))
+        reward = distance_reward + fallen_reward + open_close_reward
         if self.render_mode == "human":
             self.render()
         return self._get_observation(), reward, terminated, truncated, {
-            "fallen_pins": fallen, "success": terminated, "task": self.task,
+            "fallen_pins": fallen, "newly_fallen": newly_fallen, "success": terminated, "task": self.task,
+            "reward.distance": distance_reward,
+            "reward.fallen_pins": fallen_reward,
+            "reward.open_close": open_close_reward,
+            "distance.relevant_pin": pin_distance,
         }
 
     def _render_camera(self, camera_name: str) -> np.ndarray:
