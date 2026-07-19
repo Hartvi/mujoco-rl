@@ -52,12 +52,16 @@ class PincerController:
             mujoco.mj_resetDataKeyframe(self.model, self.data, key_id)
         else:
             mujoco.mj_resetData(self.model, self.data)
+        self.sync_target_to_pose()
+
+    def sync_target_to_pose(self) -> None:
+        """Make the current simulated pose the controller target."""
         self.target_distance = float(self.data.qpos[self.qpos_id])
         self.target_position = self.data.qpos[self.object_qpos_id:self.object_qpos_id + 3].copy()
         self.target_quat = self.data.qpos[self.object_qpos_id + 3:self.object_qpos_id + 7].copy()
-        self._apply_pose_control()
         self.data.ctrl[self.actuator_id] = self.target_distance
         mujoco.mj_forward(self.model, self.data)
+        self._apply_pose_control()
 
     def observation(self) -> np.ndarray:
         position = self.data.xpos[self.body_id].copy()

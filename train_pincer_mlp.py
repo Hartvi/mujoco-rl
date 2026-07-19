@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 import csv
+from collections import deque
 import torch
 from bowling_simple import BowlingEnv
 from pincer_mlp import PincerMLP
@@ -8,18 +9,23 @@ from pincer_mlp import PincerMLP
 def train(args):
     env = BowlingEnv(render_mode="human" if args.render else None, max_steps=args.episode_max_steps)
     log_file = open(args.log_file, "w", newline="")
-    log_writer = csv.DictWriter(log_file, fieldnames=["update", "mean_reward", "distance_reward", "fallen_reward", "open_close_reward", "rotation_reward", "ground_reward", "mean_pin_distance", "max_fallen_pins"])
+    log_writer = csv.DictWriter(log_file, fieldnames=["update", "mean_reward", "distance_reward", "fallen_reward", "newly_fallen_pins", "open_close_reward", "rotation_reward", "ground_reward", "mean_pin_distance", "max_fallen_pins", "rolling50_mean_reward", "rolling50_mean_progress", "rolling50_fallen_per_update"])
     log_writer.writeheader()
     device = torch.device(args.device)
     model = PincerMLP(observation_dim=env.observation_space["observation.state"].shape[0], action_low=env.action_space.low, action_high=env.action_space.high).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     observation, _ = env.reset(seed=args.seed)
     total_steps = 0
+    rolling_rewards = deque(maxlen=50)
+    rolling_progress = deque(maxlen=50)
+    rolling_fallen = deque(maxlen=50)
+    interval_rewards, interval_progress, interval_fallen = [], [], []
 
     for update in range(args.updates):
         states, raw_actions, old_log_probs, rewards, dones, values = [], [], [], [], [], []
         distance_rewards, fallen_rewards, open_close_rewards, pin_distances, fallen_counts = [], [], [], [], []
         rotation_rewards, ground_rewards = [], []
+        newly_fallen_counts = []
 
         for step in range(args.horizon):
             state = torch.as_tensor(model.flatten_observation(observation), dtype=torch.float32, device=device).unsqueeze(0)
@@ -38,6 +44,7 @@ def train(args):
                 )
             distance_rewards.append(info["reward.distance"])
             fallen_rewards.append(info["reward.fallen_pins"])
+            newly_fallen_counts.append(info["newly_fallen"])
             open_close_rewards.append(info["reward.open_close"])
             rotation_rewards.append(info["reward.rotation"])
             ground_rewards.append(info["reward.ground_clearance"])
@@ -71,10 +78,46 @@ def train(args):
                 optimizer.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step()
 
         mean_reward = float(rewards.mean().item())
-        log_writer.writerow({"update": update, "mean_reward": mean_reward, "distance_reward": float(sum(distance_rewards) / len(distance_rewards)), "fallen_reward": float(sum(fallen_rewards) / len(fallen_rewards)), "open_close_reward": float(sum(open_close_rewards) / len(open_close_rewards)), "rotation_reward": float(sum(rotation_rewards) / len(rotation_rewards)), "ground_reward": float(sum(ground_rewards) / len(ground_rewards)), "mean_pin_distance": float(sum(pin_distances) / len(pin_distances)), "max_fallen_pins": max(fallen_counts)})
+        mean_progress = float(sum(distance_rewards) / len(distance_rewards))
+        newly_fallen_pins = int(sum(newly_fallen_counts))
+        rolling_rewards.append(mean_reward)
+        rolling_progress.append(mean_progress)
+        rolling_fallen.append(newly_fallen_pins)
+        interval_rewards.append(mean_reward)
+        interval_progress.append(mean_progress)
+        interval_fallen.append(newly_fallen_pins)
+
+        log_writer.writerow({
+            "update": update,
+            "mean_reward": mean_reward,
+            "distance_reward": mean_progress,
+            "fallen_reward": float(sum(fallen_rewards) / len(fallen_rewards)),
+            "newly_fallen_pins": newly_fallen_pins,
+            "open_close_reward": float(sum(open_close_rewards) / len(open_close_rewards)),
+            "rotation_reward": float(sum(rotation_rewards) / len(rotation_rewards)),
+            "ground_reward": float(sum(ground_rewards) / len(ground_rewards)),
+            "mean_pin_distance": float(sum(pin_distances) / len(pin_distances)),
+            "max_fallen_pins": max(fallen_counts),
+            "rolling50_mean_reward": sum(rolling_rewards) / len(rolling_rewards),
+            "rolling50_mean_progress": sum(rolling_progress) / len(rolling_progress),
+            "rolling50_fallen_per_update": sum(rolling_fallen) / len(rolling_fallen),
+        })
         log_file.flush()
         if (update + 1) % args.print_every == 0 or update == args.updates - 1:
-            print(f"[POLICY UPDATED] update={update + 1} mean_reward={mean_reward:.3f} mean_distance={sum(distance_rewards) / len(distance_rewards):.3f} newly_fallen={sum(fallen_rewards):.0f}", flush=True)
+            print(
+                f"[POLICY UPDATED] update={update + 1} "
+                f"window={len(interval_rewards)} "
+                f"mean_reward={sum(interval_rewards) / len(interval_rewards):.3f} "
+                f"mean_progress={sum(interval_progress) / len(interval_progress):.3f} "
+                f"newly_fallen={sum(interval_fallen)} "
+                f"rolling50_reward={sum(rolling_rewards) / len(rolling_rewards):.3f} "
+                f"rolling50_fallen_per_update="
+                f"{sum(rolling_fallen) / len(rolling_fallen):.2f}",
+                flush=True,
+            )
+            interval_rewards.clear()
+            interval_progress.clear()
+            interval_fallen.clear()
             model.save(args.checkpoint)
     log_file.close()
     env.close(); model.save(args.checkpoint)

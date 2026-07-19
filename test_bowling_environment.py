@@ -43,6 +43,11 @@ class BowlingEnvironmentTest(unittest.TestCase):
 
             observation, info = env.reset(seed=123)
 
+            expected_qpos0[
+                env._ee.object_qpos_id:env._ee.object_qpos_id + 2
+            ] = env.data.qpos[
+                env._ee.object_qpos_id:env._ee.object_qpos_id + 2
+            ]
             np.testing.assert_allclose(env.data.qpos, expected_qpos0)
             np.testing.assert_allclose(env.data.qvel, 0.0)
             self.assertEqual(env.data.time, 0.0)
@@ -52,6 +57,35 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertEqual(info["fallen_pins"], 0)
             self.assertTrue(env.observation_space.contains(observation))
             self.assertEqual(env._fallen_pins(), 0)
+        finally:
+            env.close()
+
+    def test_seeded_reset_randomizes_pincer_near_pin_rack(self) -> None:
+        env = BowlingEnv()
+        try:
+            env.reset(seed=123)
+            first_xy = env.data.xpos[env._ee.body_id, :2].copy()
+            pin_xy = np.asarray([
+                env.data.xpos[body_id, :2] for body_id in env._pin_ids
+            ])
+            rack_center = pin_xy.mean(axis=0)
+            self.assertLessEqual(
+                np.linalg.norm(first_xy - rack_center),
+                env.START_RADIUS + 1e-9,
+            )
+            self.assertGreaterEqual(
+                np.min(np.linalg.norm(pin_xy - first_xy, axis=1)),
+                env.START_PIN_CLEARANCE - 1e-9,
+            )
+
+            env.reset(seed=123)
+            np.testing.assert_allclose(
+                env.data.xpos[env._ee.body_id, :2], first_xy
+            )
+            env.reset(seed=124)
+            self.assertFalse(np.allclose(
+                env.data.xpos[env._ee.body_id, :2], first_xy
+            ))
         finally:
             env.close()
 
@@ -151,6 +185,66 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
+    def test_distance_ignores_fallen_pins(self) -> None:
+        env = BowlingEnv(num_pins=2)
+        try:
+            env.reset()
+            fallen_pin_id, standing_pin_id = env._pin_ids
+            fallen_joint_id = mujoco.mj_name2id(
+                env.model, mujoco.mjtObj.mjOBJ_JOINT, "pin_1_free"
+            )
+            fallen_qpos = int(env.model.jnt_qposadr[fallen_joint_id])
+            env.data.qpos[fallen_qpos + 3:fallen_qpos + 7] = [
+                np.sqrt(0.5), np.sqrt(0.5), 0.0, 0.0
+            ]
+            env.data.qpos[
+                env._ee.object_qpos_id:env._ee.object_qpos_id + 3
+            ] = env.data.xpos[fallen_pin_id]
+            mujoco.mj_forward(env.model, env.data)
+
+            expected = np.linalg.norm(
+                env.data.xpos[standing_pin_id]
+                - env.data.xpos[env._ee.body_id]
+            )
+            self.assertAlmostEqual(env._relevant_pin_distance(), expected)
+        finally:
+            env.close()
+
+    def test_distance_reward_tracks_signed_progress(self) -> None:
+        env = BowlingEnv(max_steps=5)
+        action = np.zeros(7, dtype=np.float32)
+        try:
+            env.reset()
+            env._previous_pin_distance = 1.0
+            env._relevant_pin_distance = lambda: 0.75
+            _, _, _, _, info = env.step(action)
+            self.assertAlmostEqual(
+                info["reward.distance"], 0.25 * env.DISTANCE_SCALE
+            )
+
+            _, _, _, _, info = env.step(action)
+            self.assertEqual(info["reward.distance"], 0.0)
+
+            env._relevant_pin_distance = lambda: 1.0
+            _, _, _, _, info = env.step(action)
+            self.assertAlmostEqual(
+                info["reward.distance"], -0.25 * env.DISTANCE_SCALE
+            )
+        finally:
+            env.close()
+
+    def test_newly_fallen_pin_uses_large_bonus(self) -> None:
+        env = BowlingEnv(max_steps=5)
+        try:
+            env.reset()
+            env._fallen_pins = lambda: 1
+            _, _, _, _, info = env.step(np.zeros(7, dtype=np.float32))
+            self.assertEqual(
+                info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD
+            )
+        finally:
+            env.close()
+
     def test_success_is_termination_not_truncation(self) -> None:
         env = BowlingEnv(max_steps=5)
         action = np.zeros(7, dtype=np.float32)
@@ -212,9 +306,13 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.reset()
             zero_action = np.zeros(7, dtype=np.float32)
             _, _, _, _, info = env.step(zero_action)
+            expected_ground_reward = (
+                env.GROUND_CLEARANCE_REWARD_SCALE
+                * info["distance.ground_clearance"]
+                / env.GROUND_CLEARANCE_TARGET
+            )
             self.assertAlmostEqual(
-                info["reward.ground_clearance"],
-                env.GROUND_CLEARANCE_REWARD_SCALE,
+                info["reward.ground_clearance"], expected_ground_reward
             )
 
             downward_action = zero_action.copy()
@@ -234,6 +332,13 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.reset()
             pin_id = env._pin_ids[0]
             initial_pin_x = float(env.data.xpos[pin_id, 0])
+            env.data.qpos[
+                env._ee.object_qpos_id:env._ee.object_qpos_id + 3
+            ] = [initial_pin_x - 0.3, env.data.xpos[pin_id, 1], 0.05]
+            env.data.qvel[
+                env._ee.object_dof_id:env._ee.object_dof_id + 6
+            ] = 0.0
+            env._ee.sync_target_to_pose()
             forward_action = np.zeros(7, dtype=np.float32)
             forward_action[0] = env.action_space.high[0]
             max_acceleration = 0.0
