@@ -23,9 +23,9 @@ class BowlingEnv(gym.Env):
     NEWLY_FALLEN_REWARD = 50.0
     START_RADIUS = 0.5
     START_PIN_CLEARANCE = 0.15
-    GROUND_CLEARANCE_TARGET = 0.1
-    GROUND_CLEARANCE_REWARD_SCALE = 0.01
-    DISTANCE_SCALE = 21.0
+    GROUND_CLEARANCE_TARGET = 0.2
+    GROUND_CLEARANCE_REWARD_SCALE = 0.1
+    DISTANCE_SCALE = 5.0
 
     def __init__(self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10):
         if render_mode not in self.metadata["render_modes"] + [None]:
@@ -273,13 +273,13 @@ class BowlingEnv(gym.Env):
         distance_reward = self.DISTANCE_SCALE * (self._previous_pin_distance - pin_distance)
         self._previous_pin_distance = pin_distance
         ground_clearance = self._pincer_ground_clearance()
-        ground_reward = self.GROUND_CLEARANCE_REWARD_SCALE * float(np.clip(
-            ground_clearance / self.GROUND_CLEARANCE_TARGET, -1.0, 1.0
+        ground_reward = - self.GROUND_CLEARANCE_REWARD_SCALE * float(np.clip(
+            np.abs(ground_clearance - self.GROUND_CLEARANCE_TARGET), -1.0, 1.0
         ))
         # Rewards must be scalar. Penalize rotation magnitude so clockwise and
         # counter-clockwise commands are treated equally.
         translation_reward = float(np.linalg.norm(action[:3]))
-        rotation_reward = - float(np.linalg.norm(action[3:6]))
+        rotation_reward = -float(np.linalg.norm(action[3:6]))
         newly_fallen = max(0, fallen - self._previous_fallen)
         fallen_reward = self.NEWLY_FALLEN_REWARD * float(newly_fallen)
         self._previous_fallen = fallen

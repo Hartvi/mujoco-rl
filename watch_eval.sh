@@ -2,4 +2,5 @@
       --episodes 1 \
       --episode-max-steps 1500 \
       --render \
-      --real-time
+      --real-time \
+      --seed "$RANDOM"

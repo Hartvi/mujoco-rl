@@ -307,9 +307,11 @@ class BowlingEnvironmentTest(unittest.TestCase):
             zero_action = np.zeros(7, dtype=np.float32)
             _, _, _, _, info = env.step(zero_action)
             expected_ground_reward = (
-                env.GROUND_CLEARANCE_REWARD_SCALE
-                * info["distance.ground_clearance"]
-                / env.GROUND_CLEARANCE_TARGET
+                -env.GROUND_CLEARANCE_REWARD_SCALE
+                * abs(
+                    info["distance.ground_clearance"]
+                    - env.GROUND_CLEARANCE_TARGET
+                )
             )
             self.assertAlmostEqual(
                 info["reward.ground_clearance"], expected_ground_reward
