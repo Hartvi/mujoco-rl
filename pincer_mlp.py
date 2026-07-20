@@ -17,6 +17,9 @@ class PincerMLP(nn.Module):
         high = np.full(action_dim, 1, dtype=np.float32) if action_high is None else action_high
         self.register_buffer("action_scale", torch.as_tensor((high - low) / 2))
         self.register_buffer("action_bias", torch.as_tensor((high + low) / 2))
+        self.register_buffer("observation_mean", torch.zeros(observation_dim))
+        self.register_buffer("observation_var", torch.ones(observation_dim))
+        self.register_buffer("observation_count", torch.tensor(1e-4))
         self.log_std = nn.Parameter(torch.full((action_dim,), -0.5))
 
     @staticmethod
@@ -24,6 +27,28 @@ class PincerMLP(nn.Module):
         if isinstance(observation, Mapping):
             observation = observation["observation.state"]
         return np.asarray(observation, dtype=np.float32).reshape(-1)
+
+    @torch.no_grad()
+    def prepare_observation(self, observation, *, update=False):
+        state = torch.as_tensor(
+            self.flatten_observation(observation),
+            dtype=torch.float32,
+            device=self.action_scale.device,
+        )
+        if update:
+            count = self.observation_count
+            total = count + 1.0
+            delta = state - self.observation_mean
+            new_mean = self.observation_mean + delta / total
+            old_m2 = self.observation_var * count
+            new_m2 = old_m2 + delta * (state - new_mean)
+            self.observation_mean.copy_(new_mean)
+            self.observation_var.copy_(new_m2 / total)
+            self.observation_count.copy_(total)
+        normalized = (state - self.observation_mean) / torch.sqrt(
+            self.observation_var + 1e-8
+        )
+        return torch.clamp(normalized, -10.0, 10.0)
 
     def distribution(self, state):
         mean = self.actor(state)
@@ -42,7 +67,7 @@ class PincerMLP(nn.Module):
 
     @torch.no_grad()
     def act(self, observation, deterministic=False):
-        state = torch.as_tensor(self.flatten_observation(observation), dtype=torch.float32, device=self.action_scale.device).unsqueeze(0)
+        state = self.prepare_observation(observation).unsqueeze(0)
         dist = self.distribution(state)
         raw = dist.mean if deterministic else dist.sample()
         return (self.action_bias + self.action_scale * torch.tanh(raw))[0].cpu().numpy().astype(np.float32)
@@ -51,4 +76,7 @@ class PincerMLP(nn.Module):
         torch.save(self.state_dict(), path)
 
     def load(self, path, map_location="cpu"):
-        self.load_state_dict(torch.load(path, map_location=map_location, weights_only=True))
+        self.load_state_dict(
+            torch.load(path, map_location=map_location, weights_only=True),
+            strict=False,
+        )

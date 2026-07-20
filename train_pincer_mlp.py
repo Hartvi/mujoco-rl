@@ -28,7 +28,7 @@ def train(args):
         newly_fallen_counts = []
 
         for step in range(args.horizon):
-            state = torch.as_tensor(model.flatten_observation(observation), dtype=torch.float32, device=device).unsqueeze(0)
+            state = model.prepare_observation(observation, update=True).unsqueeze(0)
             with torch.no_grad():
                 action, log_prob, value, raw = model.action_and_value(state)
             env_action = action[0].cpu().numpy()
@@ -59,7 +59,7 @@ def train(args):
         old_log_probs = torch.stack(old_log_probs).to(device); rewards = torch.as_tensor(rewards, dtype=torch.float32, device=device)
         dones = torch.as_tensor(dones, dtype=torch.float32, device=device); values = torch.stack(values).to(device)
         with torch.no_grad():
-            last = torch.as_tensor(model.flatten_observation(observation), dtype=torch.float32, device=device).unsqueeze(0)
+            last = model.prepare_observation(observation).unsqueeze(0)
             next_value = model.value(last)[0]
 
         advantages = torch.zeros_like(rewards); gae = torch.zeros((), device=device)
@@ -74,7 +74,10 @@ def train(args):
             for indices in torch.randperm(args.horizon, device=device).split(args.batch_size):
                 _, log_prob, value, _ = model.action_and_value(states[indices], raw_actions[indices])
                 ratio = (log_prob - old_log_probs[indices]).exp(); clipped = torch.clamp(ratio, 1 - args.clip, 1 + args.clip)
-                loss = -torch.min(ratio * advantages[indices], clipped * advantages[indices]).mean() + args.value_coef * 0.5 * (returns[indices] - value).square().mean()
+                entropy = model.distribution(states[indices]).entropy().sum(-1).mean()
+                loss = (-torch.min(ratio * advantages[indices], clipped * advantages[indices]).mean()
+                        + args.value_coef * 0.5 * (returns[indices] - value).square().mean()
+                        - args.entropy_coef * entropy)
                 optimizer.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step()
 
         mean_reward = float(rewards.mean().item())
@@ -129,6 +132,7 @@ def main():
     p.add_argument("--learning-rate", type=float, default=3e-4); p.add_argument("--gamma", type=float, default=.99)
     p.add_argument("--gae-lambda", type=float, default=.95); p.add_argument("--clip", type=float, default=.2)
     p.add_argument("--value-coef", type=float, default=.5); p.add_argument("--checkpoint", default="pincer_mlp.pt")
+    p.add_argument("--entropy-coef", type=float, default=.01)
     p.add_argument("--device", default="cuda"); p.add_argument("--seed", type=int, default=0); p.add_argument("--print-every", type=int, default=10); p.add_argument("--render", action="store_true", help="show the MuJoCo viewer during training"); p.add_argument("--log-actions", action="store_true", help="periodically print compact action and pincer state summaries"); p.add_argument("--log-every", type=int, default=500, help="simulator steps between optional action logs"); p.add_argument("--log-file", default="training_rewards.csv", help="CSV file for reward metrics")
     train(p.parse_args())
 

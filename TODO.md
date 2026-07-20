@@ -25,17 +25,17 @@
 
 ## 3. Redesign and test the reward
 
-- [ ] Target the nearest upright pin, not an already-fallen pin.
-- [ ] Keep a dense approach term, such as negative distance to the target pin.
-- [ ] Reward only newly fallen pins rather than repeatedly rewarding every fallen pin.
-- [ ] Increase the newly-fallen bonus enough to dominate incidental per-step distance costs.
+- [x] Target the nearest upright pin, not an already-fallen pin.
+- [x] Keep a dense approach term, such as negative distance to the target pin.
+- [x] Reward only newly fallen pins rather than repeatedly rewarding every fallen pin.
+- [x] Increase the newly-fallen bonus enough to dominate incidental per-step distance costs.
 - [ ] Clarify the open/close shaping objective:
   - penalize unnecessary jaw motion;
   - optionally reward closing near an upright pin;
   - avoid discouraging useful grasping or contact.
 - [ ] Consider a small control or movement penalty.
-- [ ] Consider a success bonus when all requested pins have fallen.
-- [ ] Log every reward component separately.
+- [x] Add a success bonus when all requested pins have fallen.
+- [x] Log every reward component separately.
 - [ ] Plot reward components and pin success versus training steps.
 - [ ] Test the reward manually with scripted trajectories before training.
 

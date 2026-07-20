@@ -228,7 +228,22 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env._relevant_pin_distance = lambda: 1.0
             _, _, _, _, info = env.step(action)
             self.assertAlmostEqual(
-                info["reward.distance"], -0.25 * env.DISTANCE_SCALE
+                info["reward.distance"],
+                -0.25 * env.DISTANCE_SCALE * env.AWAY_DISTANCE_MULTIPLIER,
+            )
+        finally:
+            env.close()
+
+    def test_action_penalty_uses_normalized_full_action(self) -> None:
+        env = BowlingEnv(max_steps=5)
+        try:
+            env.reset()
+            env._relevant_pin_distance = lambda: env._previous_pin_distance
+            action = env.action_space.high.copy()
+            _, _, _, _, info = env.step(action)
+            self.assertAlmostEqual(
+                info["reward.action"],
+                -env.ACTION_PENALTY_SCALE * action.size,
             )
         finally:
             env.close()
@@ -245,6 +260,26 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
+    def test_pin_touch_reward_is_paid_once_per_pin_per_episode(self) -> None:
+        env = BowlingEnv(max_steps=5)
+        action = np.zeros(7, dtype=np.float32)
+        try:
+            env.reset()
+            pin_id = env._pin_ids[0]
+            env._touching_pins = lambda: {pin_id}
+
+            _, _, _, _, first_info = env.step(action)
+            _, _, _, _, second_info = env.step(action)
+
+            self.assertEqual(first_info["newly_touched_pins"], 1)
+            self.assertEqual(
+                first_info["reward.pin_touch"], env.PIN_TOUCH_REWARD
+            )
+            self.assertEqual(second_info["newly_touched_pins"], 0)
+            self.assertEqual(second_info["reward.pin_touch"], 0.0)
+        finally:
+            env.close()
+
     def test_success_is_termination_not_truncation(self) -> None:
         env = BowlingEnv(max_steps=5)
         action = np.zeros(7, dtype=np.float32)
@@ -255,6 +290,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertTrue(terminated)
             self.assertFalse(truncated)
             self.assertTrue(info["success"])
+            self.assertEqual(info["reward.success"], env.SUCCESS_REWARD)
         finally:
             env.close()
 
