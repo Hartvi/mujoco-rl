@@ -30,6 +30,9 @@ class BowlingEnv(gym.Env):
     DISTANCE_SCALE = 5.0
     AWAY_DISTANCE_MULTIPLIER = 1.25
     ACTION_PENALTY_SCALE = 0.01
+    JAW_MOTION_PENALTY_SCALE = 0.005
+    JAW_CLOSE_REWARD_SCALE = 0.02
+    JAW_CLOSE_DISTANCE = 0.15
 
     def __init__(self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10):
         if render_mode not in self.metadata["render_modes"] + [None]:
@@ -61,19 +64,15 @@ class BowlingEnv(gym.Env):
             for name in ("cube_1", "cube_2")
         ]
 
-        self.action_space = spaces.Box(
-            low=np.array(
-                [-self._ee.max_translation_delta] * 3
-                + [-self._ee.max_rotation_delta] * 3
-                + [-self._ee.max_distance_delta],
-                dtype=np.float32,
-            ),
-            high=np.array(
-                [self._ee.max_translation_delta] * 3
-                + [self._ee.max_rotation_delta] * 3
-                + [self._ee.max_distance_delta],
-                dtype=np.float32,
-            ),
+        # Policy action layout: [vx, vy, vz, wx, wy, wz, jaw_velocity].
+        # Each component is normalized to [-1, 1] and converted to a pose
+        # delta using the controller's physical rate limits and control_dt.
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(7,), dtype=np.float32)
+        self._action_delta_scale = np.array(
+            [self._ee.max_translation_delta] * 3
+            + [self._ee.max_rotation_delta] * 3
+            + [self._ee.max_distance_delta],
+            dtype=np.float64,
         )
         observation_size = self.PINCER_STATE_SIZE + self.PIN_STATE_SIZE * num_pins
         self.observation_space = spaces.Dict({
@@ -272,8 +271,9 @@ class BowlingEnv(gym.Env):
         action = np.asarray(action, dtype=np.float64)
         if not self.action_space.contains(action.astype(np.float32)):
             raise ValueError(f"Action outside space: {action}")
+        physical_action = action * self._action_delta_scale
         action_time = float(self.data.time)
-        self._ee.apply_delta(action)
+        self._ee.apply_delta(physical_action)
         for _ in range(self.FRAME_SKIP):
             self._ee.hold_pose()
             mujoco.mj_step(self.model, self.data)
@@ -298,10 +298,9 @@ class BowlingEnv(gym.Env):
         ))
         # Rewards must be scalar. Penalize rotation magnitude so clockwise and
         # counter-clockwise commands are treated equally.
-        rotation_reward = -float(np.linalg.norm(action[3:6]))
-        normalized_action = action / self.action_space.high
+        rotation_reward = -float(np.linalg.norm(physical_action[3:6]))
         action_reward = -self.ACTION_PENALTY_SCALE * float(
-            np.dot(normalized_action, normalized_action)
+            np.dot(action, action)
         )
         newly_fallen = max(0, fallen - self._previous_fallen)
         fallen_reward = self.NEWLY_FALLEN_REWARD * float(newly_fallen)
@@ -311,7 +310,16 @@ class BowlingEnv(gym.Env):
         self._touched_pins.update(touching_pins)
         touch_reward = self.PIN_TOUCH_REWARD * float(len(newly_touched_pins))
         success_reward = self.SUCCESS_REWARD if terminated else 0.0
-        open_close_reward = - pin_distance * abs(float(action[6]))
+        jaw_command = float(action[6])
+        close_proximity = max(
+            0.0, 1.0 - pin_distance / self.JAW_CLOSE_DISTANCE
+        )
+        open_close_reward = (
+            -self.JAW_MOTION_PENALTY_SCALE * abs(jaw_command)
+            + self.JAW_CLOSE_REWARD_SCALE
+            * max(0.0, -jaw_command)
+            * close_proximity
+        )
         reward = (distance_reward + fallen_reward + open_close_reward
                   + rotation_reward + ground_reward + action_reward
                   + touch_reward + success_reward)
@@ -322,6 +330,7 @@ class BowlingEnv(gym.Env):
             "newly_fallen": newly_fallen,
             "newly_touched_pins": len(newly_touched_pins),
             "success": terminated,
+            "is_success": terminated,
             "task": self.task,
             "reward.distance": distance_reward,
             "reward.rotation": rotation_reward,

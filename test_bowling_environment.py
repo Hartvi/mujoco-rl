@@ -176,7 +176,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
             negative_action = -positive_action
             _, negative_reward, _, _, negative_info = env.step(negative_action)
 
-            expected = -float(np.linalg.norm(positive_action[3:6]))
+            expected = -float(np.linalg.norm(
+                positive_action[3:6] * env._action_delta_scale[3:6]
+            ))
             self.assertIsInstance(positive_reward, float)
             self.assertIsInstance(positive_info["reward.rotation"], float)
             self.assertAlmostEqual(positive_info["reward.rotation"], expected)
@@ -244,6 +246,36 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertAlmostEqual(
                 info["reward.action"],
                 -env.ACTION_PENALTY_SCALE * action.size,
+            )
+        finally:
+            env.close()
+
+    def test_action_space_is_symmetric_and_normalized(self) -> None:
+        env = BowlingEnv()
+        try:
+            np.testing.assert_array_equal(env.action_space.low, -1.0)
+            np.testing.assert_array_equal(env.action_space.high, 1.0)
+        finally:
+            env.close()
+
+    def test_closing_near_pin_is_better_than_opening(self) -> None:
+        env = BowlingEnv(max_steps=5)
+        try:
+            near_distance = env.JAW_CLOSE_DISTANCE / 2.0
+            env.reset(seed=1)
+            env._relevant_pin_distance = lambda: near_distance
+            closing = np.zeros(7, dtype=np.float32)
+            closing[6] = -1.0
+            _, _, _, _, close_info = env.step(closing)
+
+            env.reset(seed=1)
+            env._relevant_pin_distance = lambda: near_distance
+            opening = -closing
+            _, _, _, _, open_info = env.step(opening)
+
+            self.assertGreater(
+                close_info["reward.open_close"],
+                open_info["reward.open_close"],
             )
         finally:
             env.close()

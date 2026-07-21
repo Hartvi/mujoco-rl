@@ -70,7 +70,7 @@ class PincerController:
         return np.concatenate((position, orientation, [self.data.qpos[self.qpos_id]])).astype(np.float32)
 
     def apply_delta(self, action: np.ndarray) -> None:
-        """Apply [dx, dy, dz, dRx, dRy, dRz, d_distance] deltas."""
+        """Apply physical [dx, dy, dz, dRx, dRy, dRz, d_distance] deltas."""
         action = np.asarray(action, dtype=np.float64).reshape(-1)
         if action.size != 7:
             raise ValueError(f"Pincer action must contain 7 pose values, not {action.size}")
