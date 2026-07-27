@@ -3,4 +3,7 @@
       --episode-max-steps 1500 \
       --render \
       --real-time \
-      --seed "$RANDOM"
+      --seed "$RANDOM" \
+      --model $1 \
+      --vecnormalize $2
+

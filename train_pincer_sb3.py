@@ -17,7 +17,7 @@ from stable_baselines3.common.callbacks import (
 )
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from bowling_simple import BowlingEnv
 from pincer_controller import PincerController
@@ -110,11 +110,14 @@ def _resolve_resume_stats(resume: Path, explicit: str) -> Path | None:
 
 
 def train(args: argparse.Namespace) -> None:
-    if args.n_steps % args.batch_size != 0:
+    rollout_size = args.n_steps * args.n_envs
+    if rollout_size % args.batch_size != 0:
         raise ValueError(
-            "For one environment, --batch-size must divide --n-steps "
-            f"cleanly ({args.n_steps} % {args.batch_size} != 0)."
+            "--batch-size must divide --n-steps * --n-envs cleanly "
+            f"({rollout_size} % {args.batch_size} != 0)."
         )
+    if args.n_envs < 1:
+        raise ValueError("--n-envs must be at least 1")
 
     set_random_seed(args.seed, using_cuda=args.device.startswith("cuda"))
     output_dir = Path(args.output_dir)
@@ -123,9 +126,21 @@ def train(args: argparse.Namespace) -> None:
     for path in (output_dir, checkpoint_dir, best_dir):
         path.mkdir(parents=True, exist_ok=True)
 
-    train_base = DummyVecEnv([
-        make_env(args.episode_max_steps, args.seed, output_dir / "train_monitor")
-    ])
+    train_factories = [
+        make_env(
+            args.episode_max_steps,
+            args.seed + rank,
+            output_dir / f"train_monitor_{rank}",
+        )
+        for rank in range(args.n_envs)
+    ]
+    if args.n_envs == 1:
+        train_base = DummyVecEnv(train_factories)
+    else:
+        train_base = SubprocVecEnv(
+            train_factories,
+            start_method=args.start_method,
+        )
     resume = Path(args.resume) if args.resume else None
     stats_path = _resolve_resume_stats(resume, args.vecnormalize) if resume else None
     if stats_path is not None:
@@ -177,7 +192,7 @@ def train(args: argparse.Namespace) -> None:
     callbacks = CallbackList([
         RewardLoggingCallback(),
         CheckpointCallback(
-            save_freq=args.checkpoint_freq,
+            save_freq=max(args.checkpoint_freq // args.n_envs, 1),
             save_path=str(checkpoint_dir),
             name_prefix="pincer",
             save_vecnormalize=True,
@@ -190,7 +205,7 @@ def train(args: argparse.Namespace) -> None:
             ),
             best_model_save_path=str(best_dir),
             log_path=str(output_dir / "evaluations"),
-            eval_freq=args.eval_freq,
+            eval_freq=max(args.eval_freq // args.n_envs, 1),
             n_eval_episodes=args.eval_episodes,
             deterministic=True,
             verbose=1,
@@ -229,6 +244,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--total-timesteps", type=int, default=1_000_000)
     parser.add_argument("--n-steps", type=int, default=512)
+    parser.add_argument(
+        "--n-envs",
+        type=int,
+        default=4,
+        help="parallel rollout workers; use 1 for DummyVecEnv debugging",
+    )
+    parser.add_argument(
+        "--start-method",
+        choices=("forkserver", "spawn", "fork"),
+        default="forkserver",
+        help="multiprocessing start method used by SubprocVecEnv",
+    )
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--episode-max-steps", type=int, default=1500)

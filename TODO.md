@@ -64,10 +64,10 @@
 
 ## 6. Parallelize rollout collection
 
-- [ ] Start with 4-8 headless environments using `SubprocVecEnv`.
-- [ ] Keep one separate single environment for human rendering and debugging.
-- [ ] Remember that SB3 rollout size is `n_steps * n_envs`.
-- [ ] Select `n_steps` and `batch_size` so the total rollout divides cleanly into minibatches.
+- [x] Start with 4 headless environments using `SubprocVecEnv`.
+- [x] Keep one separate single environment for human rendering and debugging.
+- [x] Remember that SB3 rollout size is `n_steps * n_envs`.
+- [x] Select `n_steps` and `batch_size` so the total rollout divides cleanly into minibatches.
 - [ ] Benchmark `DummyVecEnv` against `SubprocVecEnv`; use whichever is faster for this MuJoCo environment.
 - [ ] Compare CPU and CUDA policy updates; a small MLP may be faster on CPU.
 - [ ] Do not expect high VRAM use from a small MLP.
