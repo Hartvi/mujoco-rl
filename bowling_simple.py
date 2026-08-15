@@ -1,4 +1,5 @@
 """Simple Gymnasium bowling environment driven by the XML pincer."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -15,26 +16,27 @@ from pincer_controller import PincerController
 
 
 class BowlingEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
-    FRAME_SKIP = 10
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
+    FRAME_SKIP = 50
     PINCER_STATE_SIZE = 8
     PIN_STATE_SIZE = 14
     MAX_PINS = 10
-    NEWLY_FALLEN_REWARD = 50.0
-    PIN_TOUCH_REWARD = 5.0
-    SUCCESS_REWARD = 100.0
+    NEWLY_FALLEN_REWARD = 10.0
+    PIN_TOUCH_REWARD = 0.0
+    SUCCESS_REWARD = 25.0
     START_RADIUS = 0.5
     START_PIN_CLEARANCE = 0.15
-    GROUND_CLEARANCE_TARGET = 0.2
-    GROUND_CLEARANCE_REWARD_SCALE = 0.1
+    STRIKE_POINT_HEIGHT = 0.25
+    MIN_GROUND_CLEARANCE = 0.00
+    GROUND_PENALTY_SCALE = 3.0
     DISTANCE_SCALE = 5.0
-    AWAY_DISTANCE_MULTIPLIER = 1.25
-    ACTION_PENALTY_SCALE = 0.01
-    JAW_MOTION_PENALTY_SCALE = 0.005
-    JAW_CLOSE_REWARD_SCALE = 0.02
-    JAW_CLOSE_DISTANCE = 0.15
+    AWAY_DISTANCE_MULTIPLIER = 1.0
+    ACTION_PENALTY_SCALE = 0.002
+    TIME_PENALTY = 0.002
 
-    def __init__(self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10):
+    def __init__(
+        self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10
+    ):
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
         if not 1 <= num_pins <= self.MAX_PINS:
@@ -42,12 +44,16 @@ class BowlingEnv(gym.Env):
         self.render_mode = render_mode
         self.max_steps = max_steps
         self.num_pins = num_pins
-        self.model = mujoco.MjModel.from_xml_string(make_bowling_xml(include_pincer=True))
+        self.model = mujoco.MjModel.from_xml_string(
+            make_bowling_xml(include_pincer=True)
+        )
         self.data = mujoco.MjData(self.model)
         self._viewer: Any = None
         self._renderer: mujoco.Renderer | None = None
         self._step_count = 0
         self._previous_fallen = 0
+        self._rewarded_fallen_pins: set[int] = set()
+        self._target_pin_id: int | None = None
         self._touched_pins: set[int] = set()
         self._previous_pin_distance = 0.0
         self._last_action_time = 0.0
@@ -75,17 +81,16 @@ class BowlingEnv(gym.Env):
             dtype=np.float64,
         )
         observation_size = self.PINCER_STATE_SIZE + self.PIN_STATE_SIZE * num_pins
-        self.observation_space = spaces.Dict({
-            "observation.state": spaces.Box(
-                -np.inf, np.inf, shape=(observation_size,), dtype=np.float32
-            ),
-        })
+        self.observation_space = spaces.Dict(
+            {
+                "observation.state": spaces.Box(
+                    -np.inf, np.inf, shape=(observation_size,), dtype=np.float32
+                ),
+            }
+        )
 
     def _fallen_pins(self) -> int:
-        return sum(
-            float(self.data.xmat[body_id].reshape(3, 3)[2, 2]) < 0.75
-            for body_id in self._pin_ids
-        )
+        return len(self._fallen_pin_ids())
 
     def _pincer_ground_clearance(self) -> float:
         clearances = []
@@ -117,34 +122,51 @@ class BowlingEnv(gym.Env):
                 touching.add(pin_body_id)
         return touching
 
-    def _relevant_pin_distance(self) -> float:
-        pincer_position = self.data.xpos[self._ee.body_id]
-        pin_positions = np.asarray([self.data.xpos[body_id] for body_id in self._pin_ids])
-        fallen_mask = np.asarray([
-            self.data.xmat[body_id].reshape(3, 3)[2, 2] < 0.75
+    def _fallen_pin_ids(self) -> set[int]:
+        return {
+            body_id
             for body_id in self._pin_ids
-        ])
-        candidates = pin_positions[~fallen_mask]
-        if candidates.size == 0:
+            if float(self.data.xmat[body_id].reshape(3, 3)[2, 2]) < 0.75
+        }
+
+    def _strike_point(self, body_id: int) -> np.ndarray:
+        return self.data.xpos[body_id] + np.array([0.0, 0.0, self.STRIKE_POINT_HEIGHT])
+
+    def _select_target_pin(self, fallen_pin_ids: set[int]) -> None:
+        pincer_position = self.data.xpos[self._ee.body_id]
+        candidates = [
+            body_id for body_id in self._pin_ids if body_id not in fallen_pin_ids
+        ]
+        self._target_pin_id = min(
+            candidates,
+            key=lambda body_id: np.linalg.norm(
+                self._strike_point(body_id) - pincer_position
+            ),
+            default=None,
+        )
+
+    def _relevant_pin_distance(self) -> float:
+        if self._target_pin_id is None:
             return 0.0
-        return float(np.min(np.linalg.norm(candidates - pincer_position, axis=1)))
+        return float(
+            np.linalg.norm(
+                self._strike_point(self._target_pin_id)
+                - self.data.xpos[self._ee.body_id]
+            )
+        )
 
     def _random_pincer_start_xy(self) -> np.ndarray:
-        pin_positions = np.asarray([
-            self.data.xpos[body_id, :2] for body_id in self._pin_ids
-        ])
+        pin_positions = np.asarray(
+            [self.data.xpos[body_id, :2] for body_id in self._pin_ids]
+        )
         rack_center = pin_positions.mean(axis=0)
         best_candidate = rack_center.copy()
         best_clearance = -np.inf
         for _ in range(100):
             radius = self.START_RADIUS * np.sqrt(self.np_random.random())
             angle = self.np_random.uniform(0.0, 2.0 * np.pi)
-            candidate = rack_center + radius * np.array([
-                np.cos(angle), np.sin(angle)
-            ])
-            clearance = float(np.min(
-                np.linalg.norm(pin_positions - candidate, axis=1)
-            ))
+            candidate = rack_center + radius * np.array([np.cos(angle), np.sin(angle)])
+            clearance = float(np.min(np.linalg.norm(pin_positions - candidate, axis=1)))
             if clearance >= self.START_PIN_CLEARANCE:
                 return candidate
             if clearance > best_clearance:
@@ -158,13 +180,15 @@ class BowlingEnv(gym.Env):
         self.data.qpos[:] = self.model.qpos0
         self.data.qvel[:] = 0.0
         self._ee.reset()
-        self.data.qpos[
-            self._ee.object_qpos_id:self._ee.object_qpos_id + 2
-        ] = self._random_pincer_start_xy()
+        self.data.qpos[self._ee.object_qpos_id : self._ee.object_qpos_id + 2] = (
+            self._random_pincer_start_xy()
+        )
         self._ee.sync_target_to_pose()
         mujoco.mj_forward(self.model, self.data)
         self._step_count = 0
         self._previous_fallen = 0
+        self._rewarded_fallen_pins.clear()
+        self._select_target_pin(set())
         self._touched_pins.clear()
         self._previous_pin_distance = self._relevant_pin_distance()
         self._last_action_time = float(self.data.time)
@@ -191,12 +215,14 @@ class BowlingEnv(gym.Env):
     def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         aw, ax, ay, az = a
         bw, bx, by, bz = b
-        return np.array([
-            aw * bw - ax * bx - ay * by - az * bz,
-            aw * bx + ax * bw + ay * bz - az * by,
-            aw * by - ax * bz + ay * bw + az * bx,
-            aw * bz + ax * by - ay * bx + az * bw,
-        ])
+        return np.array(
+            [
+                aw * bw - ax * bx - ay * by - az * bz,
+                aw * bx + ax * bw + ay * bz - az * by,
+                aw * by - ax * bz + ay * bw + az * bx,
+                aw * bz + ax * by - ay * bx + az * bw,
+            ]
+        )
 
     def _pin_observation(
         self,
@@ -233,19 +259,23 @@ class BowlingEnv(gym.Env):
         # Per-pin layout: relative position (3), relative quaternion (4),
         # fallen flag (1), relative linear velocity (3), relative angular
         # velocity (3).
-        return np.concatenate((
-            relative_position,
-            relative_quat,
-            [fallen],
-            relative_linear_velocity,
-            relative_angular_velocity,
-        ))
+        return np.concatenate(
+            (
+                relative_position,
+                relative_quat,
+                [fallen],
+                relative_linear_velocity,
+                relative_angular_velocity,
+            )
+        )
 
     def _get_observation(self) -> dict[str, np.ndarray]:
-        pincer_state = np.concatenate((
-            self._ee.observation(),
-            [self._last_action_dt],
-        ))
+        pincer_state = np.concatenate(
+            (
+                self._ee.observation(),
+                [self._last_action_dt],
+            )
+        )
         pincer_position = self.data.xpos[self._ee.body_id]
         pincer_rotation = self.data.xmat[self._ee.body_id].reshape(3, 3)
         world_to_pincer = pincer_rotation.T
@@ -262,9 +292,9 @@ class BowlingEnv(gym.Env):
             for body_id in self._pin_ids
         ]
         return {
-            "observation.state": np.concatenate(
-                (pincer_state, *pin_states)
-            ).astype(np.float32)
+            "observation.state": np.concatenate((pincer_state, *pin_states)).astype(
+                np.float32
+            )
         }
 
     def step(self, action: np.ndarray):
@@ -280,69 +310,81 @@ class BowlingEnv(gym.Env):
         self._last_action_dt = float(self.data.time - action_time)
         self._last_action_time = float(self.data.time)
         self._step_count += 1
-        fallen = self._fallen_pins()
+        fallen_pin_ids = self._fallen_pin_ids()
+        fallen = len(fallen_pin_ids)
         terminated = fallen == self.num_pins
         truncated = self._step_count >= self.max_steps
-        pin_distance = self._relevant_pin_distance()
-        distance_progress = self._previous_pin_distance - pin_distance
-        distance_multiplier = (
-            self.AWAY_DISTANCE_MULTIPLIER if distance_progress < 0.0 else 1.0
-        )
-        distance_reward = (
-            self.DISTANCE_SCALE * distance_multiplier * distance_progress
-        )
+        target_fell = self._target_pin_id in fallen_pin_ids
+        if target_fell:
+            self._select_target_pin(fallen_pin_ids)
+            pin_distance = self._relevant_pin_distance()
+            distance_reward = 0.0
+        else:
+            pin_distance = self._relevant_pin_distance()
+            distance_progress = self._previous_pin_distance - pin_distance
+            distance_multiplier = (
+                self.AWAY_DISTANCE_MULTIPLIER if distance_progress < 0.0 else 1.0
+            )
+            distance_reward = (
+                self.DISTANCE_SCALE * distance_multiplier * distance_progress
+            )
         self._previous_pin_distance = pin_distance
         ground_clearance = self._pincer_ground_clearance()
-        ground_reward = - self.GROUND_CLEARANCE_REWARD_SCALE * float(np.clip(
-            np.abs(ground_clearance - self.GROUND_CLEARANCE_TARGET), -1.0, 1.0
-        ))
-        # Rewards must be scalar. Penalize rotation magnitude so clockwise and
-        # counter-clockwise commands are treated equally.
-        rotation_reward = -float(np.linalg.norm(physical_action[3:6]))
-        action_reward = -self.ACTION_PENALTY_SCALE * float(
-            np.dot(action, action)
+        ground_reward = -self.GROUND_PENALTY_SCALE * max(
+            0.0, self.MIN_GROUND_CLEARANCE - ground_clearance
         )
-        newly_fallen = max(0, fallen - self._previous_fallen)
+        rotation_reward = 0.0
+        action_reward = -self.ACTION_PENALTY_SCALE * float(np.dot(action, action))
+        newly_fallen_pin_ids = fallen_pin_ids - self._rewarded_fallen_pins
+        newly_fallen = len(newly_fallen_pin_ids)
         fallen_reward = self.NEWLY_FALLEN_REWARD * float(newly_fallen)
+        self._rewarded_fallen_pins.update(newly_fallen_pin_ids)
         self._previous_fallen = fallen
         touching_pins = self._touching_pins()
         newly_touched_pins = touching_pins - self._touched_pins
         self._touched_pins.update(touching_pins)
         touch_reward = self.PIN_TOUCH_REWARD * float(len(newly_touched_pins))
         success_reward = self.SUCCESS_REWARD if terminated else 0.0
-        jaw_command = float(action[6])
-        close_proximity = max(
-            0.0, 1.0 - pin_distance / self.JAW_CLOSE_DISTANCE
+        open_close_reward = 0.0
+        time_reward = -self.TIME_PENALTY
+        reward = (
+            distance_reward
+            + fallen_reward
+            + open_close_reward
+            + rotation_reward
+            + ground_reward
+            + action_reward
+            + touch_reward
+            + success_reward
+            + time_reward
         )
-        open_close_reward = (
-            -self.JAW_MOTION_PENALTY_SCALE * abs(jaw_command)
-            + self.JAW_CLOSE_REWARD_SCALE
-            * max(0.0, -jaw_command)
-            * close_proximity
-        )
-        reward = (distance_reward + fallen_reward + open_close_reward
-                  + rotation_reward + ground_reward + action_reward
-                  + touch_reward + success_reward)
         if self.render_mode == "human":
             self.render()
-        return self._get_observation(), reward, terminated, truncated, {
-            "fallen_pins": fallen,
-            "newly_fallen": newly_fallen,
-            "newly_touched_pins": len(newly_touched_pins),
-            "success": terminated,
-            "is_success": terminated,
-            "task": self.task,
-            "reward.distance": distance_reward,
-            "reward.rotation": rotation_reward,
-            "reward.ground_clearance": ground_reward,
-            "reward.fallen_pins": fallen_reward,
-            "reward.open_close": open_close_reward,
-            "reward.action": action_reward,
-            "reward.pin_touch": touch_reward,
-            "reward.success": success_reward,
-            "distance.relevant_pin": pin_distance,
-            "distance.ground_clearance": ground_clearance,
-        }
+        return (
+            self._get_observation(),
+            reward,
+            terminated,
+            truncated,
+            {
+                "fallen_pins": fallen,
+                "newly_fallen": newly_fallen,
+                "newly_touched_pins": len(newly_touched_pins),
+                "success": terminated,
+                "is_success": terminated,
+                "task": self.task,
+                "reward.distance": distance_reward,
+                "reward.rotation": rotation_reward,
+                "reward.ground_clearance": ground_reward,
+                "reward.fallen_pins": fallen_reward,
+                "reward.open_close": open_close_reward,
+                "reward.action": action_reward,
+                "reward.pin_touch": touch_reward,
+                "reward.success": success_reward,
+                "reward.time": time_reward,
+                "distance.relevant_pin": pin_distance,
+                "distance.ground_clearance": ground_clearance,
+            },
+        )
 
     def _render_camera(self, camera_name: str) -> np.ndarray:
         if self._renderer is None:

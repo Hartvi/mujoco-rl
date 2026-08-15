@@ -39,6 +39,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.data.time = 7.0
             env._step_count = 4
             env._previous_fallen = 3
+            env._rewarded_fallen_pins.add(env._pin_ids[0])
             env._last_action_dt = 1.0
 
             observation, info = env.reset(seed=123)
@@ -53,6 +54,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertEqual(env.data.time, 0.0)
             self.assertEqual(env._step_count, 0)
             self.assertEqual(env._previous_fallen, 0)
+            self.assertEqual(env._rewarded_fallen_pins, set())
             self.assertEqual(env._last_action_dt, 0.0)
             self.assertEqual(info["fallen_pins"], 0)
             self.assertTrue(env.observation_space.contains(observation))
@@ -164,7 +166,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
-    def test_rotation_reward_is_a_direction_independent_scalar_penalty(self) -> None:
+    def test_rotation_has_no_extra_penalty_beyond_action_penalty(self) -> None:
         env = BowlingEnv()
         try:
             env.reset()
@@ -176,13 +178,10 @@ class BowlingEnvironmentTest(unittest.TestCase):
             negative_action = -positive_action
             _, negative_reward, _, _, negative_info = env.step(negative_action)
 
-            expected = -float(np.linalg.norm(
-                positive_action[3:6] * env._action_delta_scale[3:6]
-            ))
             self.assertIsInstance(positive_reward, float)
             self.assertIsInstance(positive_info["reward.rotation"], float)
-            self.assertAlmostEqual(positive_info["reward.rotation"], expected)
-            self.assertAlmostEqual(negative_info["reward.rotation"], expected)
+            self.assertEqual(positive_info["reward.rotation"], 0.0)
+            self.assertEqual(negative_info["reward.rotation"], 0.0)
             self.assertTrue(np.isscalar(negative_reward))
         finally:
             env.close()
@@ -204,11 +203,32 @@ class BowlingEnvironmentTest(unittest.TestCase):
             ] = env.data.xpos[fallen_pin_id]
             mujoco.mj_forward(env.model, env.data)
 
+            env._target_pin_id = standing_pin_id
             expected = np.linalg.norm(
                 env.data.xpos[standing_pin_id]
+                + np.array([0.0, 0.0, env.STRIKE_POINT_HEIGHT])
                 - env.data.xpos[env._ee.body_id]
             )
             self.assertAlmostEqual(env._relevant_pin_distance(), expected)
+        finally:
+            env.close()
+
+    def test_distance_targets_mid_pin_and_target_stays_stable(self) -> None:
+        env = BowlingEnv(num_pins=2)
+        try:
+            env.reset(seed=1)
+            target_pin_id = env._target_pin_id
+            self.assertIsNotNone(target_pin_id)
+            expected = np.linalg.norm(
+                env.data.xpos[target_pin_id]
+                + np.array([0.0, 0.0, env.STRIKE_POINT_HEIGHT])
+                - env.data.xpos[env._ee.body_id]
+            )
+            self.assertAlmostEqual(env._relevant_pin_distance(), expected)
+
+            env.data.qpos[env._ee.object_qpos_id] += 0.5
+            mujoco.mj_forward(env.model, env.data)
+            self.assertEqual(env._target_pin_id, target_pin_id)
         finally:
             env.close()
 
@@ -258,25 +278,22 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
-    def test_closing_near_pin_is_better_than_opening(self) -> None:
+    def test_jaw_has_no_dedicated_shaping_reward(self) -> None:
         env = BowlingEnv(max_steps=5)
         try:
-            near_distance = env.JAW_CLOSE_DISTANCE / 2.0
             env.reset(seed=1)
-            env._relevant_pin_distance = lambda: near_distance
+            env._relevant_pin_distance = lambda: env._previous_pin_distance
             closing = np.zeros(7, dtype=np.float32)
             closing[6] = -1.0
             _, _, _, _, close_info = env.step(closing)
 
             env.reset(seed=1)
-            env._relevant_pin_distance = lambda: near_distance
+            env._relevant_pin_distance = lambda: env._previous_pin_distance
             opening = -closing
             _, _, _, _, open_info = env.step(opening)
 
-            self.assertGreater(
-                close_info["reward.open_close"],
-                open_info["reward.open_close"],
-            )
+            self.assertEqual(close_info["reward.open_close"], 0.0)
+            self.assertEqual(open_info["reward.open_close"], 0.0)
         finally:
             env.close()
 
@@ -284,11 +301,32 @@ class BowlingEnvironmentTest(unittest.TestCase):
         env = BowlingEnv(max_steps=5)
         try:
             env.reset()
-            env._fallen_pins = lambda: 1
+            env._fallen_pin_ids = lambda: {env._pin_ids[0]}
             _, _, _, _, info = env.step(np.zeros(7, dtype=np.float32))
             self.assertEqual(
                 info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD
             )
+        finally:
+            env.close()
+
+    def test_each_pin_fall_reward_is_paid_only_once(self) -> None:
+        env = BowlingEnv(max_steps=5)
+        action = np.zeros(7, dtype=np.float32)
+        try:
+            env.reset()
+            fallen_ids: set[int] = {env._pin_ids[0]}
+            env._fallen_pin_ids = lambda: fallen_ids
+
+            _, _, _, _, first_info = env.step(action)
+            fallen_ids = set()
+            env.step(action)
+            fallen_ids = {env._pin_ids[0]}
+            _, _, _, _, second_info = env.step(action)
+
+            self.assertEqual(
+                first_info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD
+            )
+            self.assertEqual(second_info["reward.fallen_pins"], 0.0)
         finally:
             env.close()
 
@@ -317,7 +355,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
         action = np.zeros(7, dtype=np.float32)
         try:
             env.reset()
-            env._fallen_pins = lambda: env.num_pins
+            env._fallen_pin_ids = lambda: set(env._pin_ids)
             _, _, terminated, truncated, info = env.step(action)
             self.assertTrue(terminated)
             self.assertFalse(truncated)
@@ -374,12 +412,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.reset()
             zero_action = np.zeros(7, dtype=np.float32)
             _, _, _, _, info = env.step(zero_action)
-            expected_ground_reward = (
-                -env.GROUND_CLEARANCE_REWARD_SCALE
-                * abs(
-                    info["distance.ground_clearance"]
-                    - env.GROUND_CLEARANCE_TARGET
-                )
+            expected_ground_reward = -env.GROUND_PENALTY_SCALE * max(
+                0.0,
+                env.MIN_GROUND_CLEARANCE - info["distance.ground_clearance"],
             )
             self.assertAlmostEqual(
                 info["reward.ground_clearance"], expected_ground_reward

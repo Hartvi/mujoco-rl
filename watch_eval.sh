@@ -4,6 +4,6 @@
       --render \
       --real-time \
       --seed "$RANDOM" \
-      --model $1 \
-      --vecnormalize $2
+      --model runs/pincer_sb3/best/best_model.zip \
+      --vecnormalize  runs/pincer_sb3/best/vecnormalize.pkl
 
