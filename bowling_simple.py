@@ -44,10 +44,10 @@ class BowlingEnv(gym.Env):
         self.render_mode = render_mode
         self.max_steps = max_steps
         self.num_pins = num_pins
-        self.model = mujoco.MjModel.from_xml_string(
+        self.bowling_scene = mujoco.MjModel.from_xml_string(
             make_bowling_xml(include_pincer=True)
         )
-        self.data = mujoco.MjData(self.model)
+        self.data = mujoco.MjData(self.bowling_scene)
         self._viewer: Any = None
         self._renderer: mujoco.Renderer | None = None
         self._step_count = 0
@@ -59,17 +59,25 @@ class BowlingEnv(gym.Env):
         self._last_action_time = 0.0
         self._last_action_dt = 0.0
         self.task = "bowl the pins with the pincer"
-        self.control_dt = float(self.model.opt.timestep * self.FRAME_SKIP)
-        self._ee = PincerController(self.model, self.data, control_dt=self.control_dt)
+        self.control_dt = float(self.bowling_scene.opt.timestep * self.FRAME_SKIP)
+        self._ee = PincerController(
+            self.bowling_scene, self.data, control_dt=self.control_dt
+        )
         self._pin_ids = [
-            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}")
+            mujoco.mj_name2id(self.bowling_scene, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}")
             for i in range(1, num_pins + 1)
         ]
         self._cube_geom_ids = [
-            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            mujoco.mj_name2id(self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, name)
             for name in ("cube_1", "cube_2")
         ]
-
+        self._pin_head_ids = [
+            mujoco.mj_name2id(
+                self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, f"pin_{i}_head"
+            )
+            for i in range(1, num_pins + 1)
+        ]
+        self.pin2headid = dict(zip(self._pin_ids, self._pin_head_ids))
         # Policy action layout: [vx, vy, vz, wx, wy, wz, jaw_velocity].
         # Each component is normalized to [-1, 1] and converted to a pose
         # delta using the controller's physical rate limits and control_dt.
@@ -97,7 +105,7 @@ class BowlingEnv(gym.Env):
         for geom_id in self._cube_geom_ids:
             rotation = self.data.geom_xmat[geom_id].reshape(3, 3)
             vertical_half_extent = float(
-                np.abs(rotation[2]) @ self.model.geom_size[geom_id]
+                np.abs(rotation[2]) @ self.bowling_scene.geom_size[geom_id]
             )
             clearances.append(
                 float(self.data.geom_xpos[geom_id, 2]) - vertical_half_extent
@@ -117,7 +125,7 @@ class BowlingEnv(gym.Env):
                 other_geom = geom1
             else:
                 continue
-            pin_body_id = int(self.model.geom_bodyid[other_geom])
+            pin_body_id = int(self.bowling_scene.geom_bodyid[other_geom])
             if pin_body_id in pin_body_ids:
                 touching.add(pin_body_id)
         return touching
@@ -145,15 +153,23 @@ class BowlingEnv(gym.Env):
             default=None,
         )
 
-    def _relevant_pin_distance(self) -> float:
+    def _relevant_pin_distance(self, part: str | None = None) -> float:
         if self._target_pin_id is None:
             return 0.0
-        return float(
-            np.linalg.norm(
-                self._strike_point(self._target_pin_id)
-                - self.data.xpos[self._ee.body_id]
+        if part is None:
+            return float(
+                np.linalg.norm(
+                    self._strike_point(self._target_pin_id)
+                    - self.data.xpos[self._ee.body_id]
+                )
             )
-        )
+        else:
+            return float(
+                np.linalg.norm(
+                    self._strike_point(self.pin2headid[self._target_pin_id])
+                    - self.data.xpos[self._ee.body_id]
+                )
+            )
 
     def _random_pincer_start_xy(self) -> np.ndarray:
         pin_positions = np.asarray(
@@ -176,15 +192,15 @@ class BowlingEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
-        mujoco.mj_resetData(self.model, self.data)
-        self.data.qpos[:] = self.model.qpos0
+        mujoco.mj_resetData(self.bowling_scene, self.data)
+        self.data.qpos[:] = self.bowling_scene.qpos0
         self.data.qvel[:] = 0.0
         self._ee.reset()
         self.data.qpos[self._ee.object_qpos_id : self._ee.object_qpos_id + 2] = (
             self._random_pincer_start_xy()
         )
         self._ee.sync_target_to_pose()
-        mujoco.mj_forward(self.model, self.data)
+        mujoco.mj_forward(self.bowling_scene, self.data)
         self._step_count = 0
         self._previous_fallen = 0
         self._rewarded_fallen_pins.clear()
@@ -198,7 +214,7 @@ class BowlingEnv(gym.Env):
     def _body_velocity(self, body_id: int) -> np.ndarray:
         velocity = np.zeros(6, dtype=np.float64)
         mujoco.mj_objectVelocity(
-            self.model,
+            self.bowling_scene,
             self.data,
             mujoco.mjtObj.mjOBJ_BODY,
             body_id,
@@ -306,7 +322,7 @@ class BowlingEnv(gym.Env):
         self._ee.apply_delta(physical_action)
         for _ in range(self.FRAME_SKIP):
             self._ee.hold_pose()
-            mujoco.mj_step(self.model, self.data)
+            mujoco.mj_step(self.bowling_scene, self.data)
         self._last_action_dt = float(self.data.time - action_time)
         self._last_action_time = float(self.data.time)
         self._step_count += 1
@@ -388,7 +404,7 @@ class BowlingEnv(gym.Env):
 
     def _render_camera(self, camera_name: str) -> np.ndarray:
         if self._renderer is None:
-            self._renderer = mujoco.Renderer(self.model, height=480, width=640)
+            self._renderer = mujoco.Renderer(self.bowling_scene, height=480, width=640)
         self._renderer.update_scene(self.data, camera=camera_name)
         return self._renderer.render().copy()
 
@@ -397,7 +413,9 @@ class BowlingEnv(gym.Env):
             return self._render_camera("laptop_camera")
         if self.render_mode == "human":
             if self._viewer is None:
-                self._viewer = mujoco.viewer.launch_passive(self.model, self.data)
+                self._viewer = mujoco.viewer.launch_passive(
+                    self.bowling_scene, self.data
+                )
             self._viewer.sync()
 
     def close(self):

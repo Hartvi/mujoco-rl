@@ -14,6 +14,15 @@ from bowling_simple import BowlingEnv
 
 
 class BowlingEnvironmentTest(unittest.TestCase):
+    def test_bowling_scene_object_queries(self) -> None:
+        env = BowlingEnv()
+        ids = env._pin_ids + env._cube_geom_ids + env._pin_head_ids
+
+        for id in ids:
+            assert id >= 0, f"Id: {id}"
+            assert env.data.geom_xmat[id] is not None
+            assert env.data.geom_xpos[id] is not None
+
     def test_gymnasium_and_sb3_environment_checks(self) -> None:
         env = BowlingEnv()
         try:
@@ -33,7 +42,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
     def test_reset_restores_full_episode_state(self) -> None:
         env = BowlingEnv(max_steps=5)
         try:
-            expected_qpos0 = env.model.qpos0.copy()
+            expected_qpos0 = env.bowling_scene.qpos0.copy()
             env.data.qpos[:] += 0.1
             env.data.qvel[:] = 1.0
             env.data.time = 7.0
@@ -44,11 +53,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
 
             observation, info = env.reset(seed=123)
 
-            expected_qpos0[
-                env._ee.object_qpos_id:env._ee.object_qpos_id + 2
-            ] = env.data.qpos[
-                env._ee.object_qpos_id:env._ee.object_qpos_id + 2
-            ]
+            expected_qpos0[env._ee.object_qpos_id : env._ee.object_qpos_id + 2] = (
+                env.data.qpos[env._ee.object_qpos_id : env._ee.object_qpos_id + 2]
+            )
             np.testing.assert_allclose(env.data.qpos, expected_qpos0)
             np.testing.assert_allclose(env.data.qvel, 0.0)
             self.assertEqual(env.data.time, 0.0)
@@ -67,9 +74,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
         try:
             env.reset(seed=123)
             first_xy = env.data.xpos[env._ee.body_id, :2].copy()
-            pin_xy = np.asarray([
-                env.data.xpos[body_id, :2] for body_id in env._pin_ids
-            ])
+            pin_xy = np.asarray(
+                [env.data.xpos[body_id, :2] for body_id in env._pin_ids]
+            )
             rack_center = pin_xy.mean(axis=0)
             self.assertLessEqual(
                 np.linalg.norm(first_xy - rack_center),
@@ -81,13 +88,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
             )
 
             env.reset(seed=123)
-            np.testing.assert_allclose(
-                env.data.xpos[env._ee.body_id, :2], first_xy
-            )
+            np.testing.assert_allclose(env.data.xpos[env._ee.body_id, :2], first_xy)
             env.reset(seed=124)
-            self.assertFalse(np.allclose(
-                env.data.xpos[env._ee.body_id, :2], first_xy
-            ))
+            self.assertFalse(np.allclose(env.data.xpos[env._ee.body_id, :2], first_xy))
         finally:
             env.close()
 
@@ -101,10 +104,14 @@ class BowlingEnvironmentTest(unittest.TestCase):
             world_to_pincer = env.data.xmat[env._ee.body_id].reshape(3, 3).T
             for index, body_id in enumerate(env._pin_ids):
                 start = env.PINCER_STATE_SIZE + index * env.PIN_STATE_SIZE
-                pin_state = state[start:start + env.PIN_STATE_SIZE]
-                expected_position = world_to_pincer @ (env.data.xpos[body_id] - pincer_position)
+                pin_state = state[start : start + env.PIN_STATE_SIZE]
+                expected_position = world_to_pincer @ (
+                    env.data.xpos[body_id] - pincer_position
+                )
                 np.testing.assert_allclose(pin_state[:3], expected_position, atol=1e-7)
-                np.testing.assert_allclose(pin_state[3:7], [1.0, 0.0, 0.0, 0.0], atol=1e-7)
+                np.testing.assert_allclose(
+                    pin_state[3:7], [1.0, 0.0, 0.0, 0.0], atol=1e-7
+                )
                 self.assertEqual(pin_state[7], 0.0)
                 np.testing.assert_allclose(pin_state[8:14], 0.0, atol=1e-7)
         finally:
@@ -114,21 +121,40 @@ class BowlingEnvironmentTest(unittest.TestCase):
         env = BowlingEnv()
         try:
             env.reset()
-            pincer_dof = int(env.model.jnt_dofadr[env._ee.object_joint_id])
-            pin_joint = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, "pin_1_free")
-            pin_dof = int(env.model.jnt_dofadr[pin_joint])
-            env.data.qvel[pincer_dof:pincer_dof + 6] = [0.25, 0.5, 0.75, 1.0, 1.0, 1.0]
-            env.data.qvel[pin_dof:pin_dof + 6] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-            mujoco.mj_forward(env.model, env.data)
+            pincer_dof = int(env.bowling_scene.jnt_dofadr[env._ee.object_joint_id])
+            pin_joint = mujoco.mj_name2id(
+                env.bowling_scene, mujoco.mjtObj.mjOBJ_JOINT, "pin_1_free"
+            )
+            pin_dof = int(env.bowling_scene.jnt_dofadr[pin_joint])
+            env.data.qvel[pincer_dof : pincer_dof + 6] = [
+                0.25,
+                0.5,
+                0.75,
+                1.0,
+                1.0,
+                1.0,
+            ]
+            env.data.qvel[pin_dof : pin_dof + 6] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+            mujoco.mj_forward(env.bowling_scene, env.data)
             state = env._get_observation()["observation.state"]
             start = env.PINCER_STATE_SIZE
             pincer_velocity = env._body_velocity(env._ee.body_id)
             pin_velocity = env._body_velocity(env._pin_ids[0])
-            relative_position = env.data.xpos[env._pin_ids[0]] - env.data.xpos[env._ee.body_id]
-            expected_linear = pin_velocity[3:] - pincer_velocity[3:] - np.cross(pincer_velocity[:3], relative_position)
+            relative_position = (
+                env.data.xpos[env._pin_ids[0]] - env.data.xpos[env._ee.body_id]
+            )
+            expected_linear = (
+                pin_velocity[3:]
+                - pincer_velocity[3:]
+                - np.cross(pincer_velocity[:3], relative_position)
+            )
             expected_angular = pin_velocity[:3] - pincer_velocity[:3]
-            np.testing.assert_allclose(state[start + 8:start + 11], expected_linear, atol=1e-7)
-            np.testing.assert_allclose(state[start + 11:start + 14], expected_angular, atol=1e-7)
+            np.testing.assert_allclose(
+                state[start + 8 : start + 11], expected_linear, atol=1e-7
+            )
+            np.testing.assert_allclose(
+                state[start + 11 : start + 14], expected_angular, atol=1e-7
+            )
         finally:
             env.close()
 
@@ -137,10 +163,19 @@ class BowlingEnvironmentTest(unittest.TestCase):
         try:
             env.reset()
             pin_index = 2
-            joint_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, f"pin_{pin_index + 1}_free")
-            qpos_adr = int(env.model.jnt_qposadr[joint_id])
-            env.data.qpos[qpos_adr + 3:qpos_adr + 7] = [np.sqrt(0.5), np.sqrt(0.5), 0.0, 0.0]
-            mujoco.mj_forward(env.model, env.data)
+            joint_id = mujoco.mj_name2id(
+                env.bowling_scene,
+                mujoco.mjtObj.mjOBJ_JOINT,
+                f"pin_{pin_index + 1}_free",
+            )
+            qpos_adr = int(env.bowling_scene.jnt_qposadr[joint_id])
+            env.data.qpos[qpos_adr + 3 : qpos_adr + 7] = [
+                np.sqrt(0.5),
+                np.sqrt(0.5),
+                0.0,
+                0.0,
+            ]
+            mujoco.mj_forward(env.bowling_scene, env.data)
             state = env._get_observation()["observation.state"]
             start = env.PINCER_STATE_SIZE + pin_index * env.PIN_STATE_SIZE
             self.assertEqual(state[start + 7], 1.0)
@@ -192,16 +227,19 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.reset()
             fallen_pin_id, standing_pin_id = env._pin_ids
             fallen_joint_id = mujoco.mj_name2id(
-                env.model, mujoco.mjtObj.mjOBJ_JOINT, "pin_1_free"
+                env.bowling_scene, mujoco.mjtObj.mjOBJ_JOINT, "pin_1_free"
             )
-            fallen_qpos = int(env.model.jnt_qposadr[fallen_joint_id])
-            env.data.qpos[fallen_qpos + 3:fallen_qpos + 7] = [
-                np.sqrt(0.5), np.sqrt(0.5), 0.0, 0.0
+            fallen_qpos = int(env.bowling_scene.jnt_qposadr[fallen_joint_id])
+            env.data.qpos[fallen_qpos + 3 : fallen_qpos + 7] = [
+                np.sqrt(0.5),
+                np.sqrt(0.5),
+                0.0,
+                0.0,
             ]
-            env.data.qpos[
-                env._ee.object_qpos_id:env._ee.object_qpos_id + 3
-            ] = env.data.xpos[fallen_pin_id]
-            mujoco.mj_forward(env.model, env.data)
+            env.data.qpos[env._ee.object_qpos_id : env._ee.object_qpos_id + 3] = (
+                env.data.xpos[fallen_pin_id]
+            )
+            mujoco.mj_forward(env.bowling_scene, env.data)
 
             env._target_pin_id = standing_pin_id
             expected = np.linalg.norm(
@@ -227,7 +265,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertAlmostEqual(env._relevant_pin_distance(), expected)
 
             env.data.qpos[env._ee.object_qpos_id] += 0.5
-            mujoco.mj_forward(env.model, env.data)
+            mujoco.mj_forward(env.bowling_scene, env.data)
             self.assertEqual(env._target_pin_id, target_pin_id)
         finally:
             env.close()
@@ -240,9 +278,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env._previous_pin_distance = 1.0
             env._relevant_pin_distance = lambda: 0.75
             _, _, _, _, info = env.step(action)
-            self.assertAlmostEqual(
-                info["reward.distance"], 0.25 * env.DISTANCE_SCALE
-            )
+            self.assertAlmostEqual(info["reward.distance"], 0.25 * env.DISTANCE_SCALE)
 
             _, _, _, _, info = env.step(action)
             self.assertEqual(info["reward.distance"], 0.0)
@@ -303,9 +339,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.reset()
             env._fallen_pin_ids = lambda: {env._pin_ids[0]}
             _, _, _, _, info = env.step(np.zeros(7, dtype=np.float32))
-            self.assertEqual(
-                info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD
-            )
+            self.assertEqual(info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD)
         finally:
             env.close()
 
@@ -323,9 +357,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             fallen_ids = {env._pin_ids[0]}
             _, _, _, _, second_info = env.step(action)
 
-            self.assertEqual(
-                first_info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD
-            )
+            self.assertEqual(first_info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD)
             self.assertEqual(second_info["reward.fallen_pins"], 0.0)
         finally:
             env.close()
@@ -342,9 +374,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             _, _, _, _, second_info = env.step(action)
 
             self.assertEqual(first_info["newly_touched_pins"], 1)
-            self.assertEqual(
-                first_info["reward.pin_touch"], env.PIN_TOUCH_REWARD
-            )
+            self.assertEqual(first_info["reward.pin_touch"], env.PIN_TOUCH_REWARD)
             self.assertEqual(second_info["newly_touched_pins"], 0)
             self.assertEqual(second_info["reward.pin_touch"], 0.0)
         finally:
@@ -396,10 +426,10 @@ class BowlingEnvironmentTest(unittest.TestCase):
             frozenset(
                 (
                     mujoco.mj_id2name(
-                        env.model, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom1)
+                        env.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom1)
                     ),
                     mujoco.mj_id2name(
-                        env.model, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom2)
+                        env.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom2)
                     ),
                 )
             )
@@ -437,12 +467,12 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.reset()
             pin_id = env._pin_ids[0]
             initial_pin_x = float(env.data.xpos[pin_id, 0])
-            env.data.qpos[
-                env._ee.object_qpos_id:env._ee.object_qpos_id + 3
-            ] = [initial_pin_x - 0.3, env.data.xpos[pin_id, 1], 0.05]
-            env.data.qvel[
-                env._ee.object_dof_id:env._ee.object_dof_id + 6
-            ] = 0.0
+            env.data.qpos[env._ee.object_qpos_id : env._ee.object_qpos_id + 3] = [
+                initial_pin_x - 0.3,
+                env.data.xpos[pin_id, 1],
+                0.05,
+            ]
+            env.data.qvel[env._ee.object_dof_id : env._ee.object_dof_id + 6] = 0.0
             env._ee.sync_target_to_pose()
             forward_action = np.zeros(7, dtype=np.float32)
             forward_action[0] = env.action_space.high[0]
@@ -460,11 +490,14 @@ class BowlingEnvironmentTest(unittest.TestCase):
                 0.05,
             )
             self.assertLess(max_acceleration, 1e5)
-            self.assertTrue(np.all(
-                env.model.dof_damping[
-                    env._ee.object_dof_id:env._ee.object_dof_id + 6
-                ] > 0.0
-            ))
+            self.assertTrue(
+                np.all(
+                    env.bowling_scene.dof_damping[
+                        env._ee.object_dof_id : env._ee.object_dof_id + 6
+                    ]
+                    > 0.0
+                )
+            )
         finally:
             env.close()
 
@@ -472,12 +505,10 @@ class BowlingEnvironmentTest(unittest.TestCase):
         env = BowlingEnv()
         try:
             env.reset()
-            self.assertNotIn(
-                frozenset(("cube_1", "cube_2")), self._contact_names(env)
-            )
+            self.assertNotIn(frozenset(("cube_1", "cube_2")), self._contact_names(env))
 
             env.data.qpos[env._ee.object_qpos_id + 2] = 0.005
-            mujoco.mj_forward(env.model, env.data)
+            mujoco.mj_forward(env.bowling_scene, env.data)
             ground_contacts = self._contact_names(env)
             self.assertTrue(
                 all(
@@ -488,10 +519,10 @@ class BowlingEnvironmentTest(unittest.TestCase):
 
             env.reset()
             pin_position = env.data.xpos[env._pin_ids[0]].copy()
-            env.data.qpos[env._ee.object_qpos_id:env._ee.object_qpos_id + 3] = (
+            env.data.qpos[env._ee.object_qpos_id : env._ee.object_qpos_id + 3] = (
                 pin_position + np.array([0.0, 0.0, 0.08])
             )
-            mujoco.mj_forward(env.model, env.data)
+            mujoco.mj_forward(env.bowling_scene, env.data)
             pin_contacts = self._contact_names(env)
             self.assertTrue(
                 any(
