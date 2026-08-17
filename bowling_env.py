@@ -1,8 +1,9 @@
 """Gymnasium bowling environment with a simulated Panda arm."""
+
 from __future__ import annotations
 
-from typing import Any
 import time
+from typing import Any, ClassVar
 
 import gymnasium as gym
 import mujoco
@@ -15,31 +16,45 @@ from panda_controller import PandaController
 
 
 class BowlingEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
+    metadata: ClassVar[dict[str, Any]] = {
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": 60,
+    }
 
-    def __init__(self, render_mode: str | None = None, max_steps: int = 500):
+    def __init__(self, render_mode: str | None = None, max_steps: int = 500) -> None:
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
         self.render_mode = render_mode
-        self.max_steps = max_steps
-        self.model = mujoco.MjModel.from_xml_string(make_bowling_xml())
+        self.max_steps: int = max_steps
+        self.model: mujoco.MjModel = mujoco.MjModel.from_xml_string(make_bowling_xml())
         self.data = mujoco.MjData(self.model)
         self._viewer: Any = None
         self._renderer: mujoco.Renderer | None = None
         self._step_count = 0
         self.task = "bowl the pins"
         self._ee = PandaController(self.model, self.data)
-        self._pin_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}") for i in range(1, 11)]
+        self._pin_ids: list[int] = [
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}")
+            for i in range(1, 11)
+        ]
 
         self.action_space = spaces.Box(
             low=np.array([-0.05] * 3 + [-0.2] * 3, dtype=np.float32),
             high=np.array([0.05] * 3 + [0.2] * 3, dtype=np.float32),
         )
-        self.observation_space = spaces.Dict({
-            "observation.state": spaces.Box(-np.inf, np.inf, shape=(6,), dtype=np.float32),
-            "observation.images.laptop": spaces.Box(0, 255, shape=(480, 640, 3), dtype=np.uint8),
-            "observation.images.phone": spaces.Box(0, 255, shape=(480, 640, 3), dtype=np.uint8),
-        })
+        self.observation_space = spaces.Dict(
+            {
+                "observation.state": spaces.Box(
+                    -np.inf, np.inf, shape=(6,), dtype=np.float32
+                ),
+                "observation.images.laptop": spaces.Box(
+                    0, 255, shape=(480, 640, 3), dtype=np.uint8
+                ),
+                "observation.images.phone": spaces.Box(
+                    0, 255, shape=(480, 640, 3), dtype=np.uint8
+                ),
+            }
+        )
 
     def _fallen_pins(self) -> int:
         fallen = 0
@@ -76,18 +91,24 @@ class BowlingEnv(gym.Env):
             mujoco.mj_step(self.model, self.data)
         self._step_count += 1
 
-        fallen = self._fallen_pins()
-        terminated = fallen == 10
-        truncated = self._step_count >= self.max_steps
-        reward = float(fallen) - 0.01 * float(np.dot(action, action))
+        fallen: int = self._fallen_pins()
+        terminated: bool = fallen == 10
+        truncated: bool = self._step_count >= self.max_steps
+        reward: float = float(fallen) - 0.01 * float(np.dot(action, action))
 
         if self.render_mode == "human":
             self.render()
-        return self._get_observation(), reward, terminated, truncated, {
-            "fallen_pins": fallen,
-            "success": terminated,
-            "task": self.task,
-        }
+        return (
+            self._get_observation(),
+            reward,
+            terminated,
+            truncated,
+            {
+                "fallen_pins": fallen,
+                "success": terminated,
+                "task": self.task,
+            },
+        )
 
     def _render_camera(self, camera_name: str) -> np.ndarray:
         if self._renderer is None:
@@ -95,15 +116,16 @@ class BowlingEnv(gym.Env):
         self._renderer.update_scene(self.data, camera=camera_name)
         return self._renderer.render().copy()
 
-    def render(self):
+    def render(self) -> np.ndarray[tuple[Any, ...], np.dtype[Any]] | None:
         if self.render_mode == "rgb_array":
             return self._render_camera("laptop_camera")
         if self.render_mode == "human":
             if self._viewer is None:
                 self._viewer = mujoco.viewer.launch_passive(self.model, self.data)
             self._viewer.sync()
+        return None
 
-    def close(self):
+    def close(self) -> None:
         if self._viewer is not None and self.render_mode == "human":
             self._viewer.close()
         if self._renderer is not None:

@@ -1,4 +1,5 @@
 """Evaluate a trained pincer MLP against the bowling environment."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from bowling_simple import BowlingEnv
+from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
 
 
@@ -22,7 +23,7 @@ class EpisodeResult:
     success: bool
 
 
-ActionFunction = Callable[[dict[str, np.ndarray], BowlingEnv], np.ndarray]
+ActionFunction = Callable[[dict[str, np.ndarray], BowlingSimple], np.ndarray]
 
 
 def evaluate(
@@ -36,7 +37,7 @@ def evaluate(
     real_time: bool,
     summary_only: bool,
 ) -> list[EpisodeResult]:
-    env = BowlingEnv(
+    env = BowlingSimple(
         render_mode="human" if render else None,
         max_steps=episode_max_steps,
     )
@@ -113,12 +114,10 @@ def load_checkpoint_policy(
     *,
     deterministic: bool,
 ) -> ActionFunction:
-    probe_env = BowlingEnv()
+    probe_env = BowlingSimple()
     try:
         model = PincerMLP(
-            observation_dim=probe_env.observation_space[
-                "observation.state"
-            ].shape[0],
+            observation_dim=probe_env.observation_space["observation.state"].shape[0],
             action_low=probe_env.action_space.low,
             action_high=probe_env.action_space.high,
         ).to(device)
@@ -128,7 +127,7 @@ def load_checkpoint_policy(
     model.load(checkpoint, map_location=device)
     model.eval()
 
-    def act(observation: dict[str, np.ndarray], _env: BowlingEnv) -> np.ndarray:
+    def act(observation: dict[str, np.ndarray], _env: BowlingSimple) -> np.ndarray:
         return model.act(observation, deterministic=deterministic)
 
     return act
@@ -136,16 +135,17 @@ def load_checkpoint_policy(
 
 def random_action(
     _observation: dict[str, np.ndarray],
-    env: BowlingEnv,
+    env: BowlingSimple,
 ) -> np.ndarray:
     return env.action_space.sample()
 
 
 def no_op_action(
     _observation: dict[str, np.ndarray],
-    env: BowlingEnv,
+    env: BowlingSimple,
 ) -> np.ndarray:
-    return np.zeros(env.action_space.shape, dtype=env.action_space.dtype)
+    assert env.action_space.shape is not None
+    return np.zeros(shape=env.action_space.shape, dtype=env.action_space.dtype)
 
 
 def main() -> None:
@@ -195,10 +195,12 @@ def main() -> None:
         )
     ]
     if args.include_baselines:
-        policies.extend([
-            ("random", random_action),
-            ("no-op", no_op_action),
-        ])
+        policies.extend(
+            [
+                ("random", random_action),
+                ("no-op", no_op_action),
+            ]
+        )
 
     for name, action_function in policies:
         results = evaluate(

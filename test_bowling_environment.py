@@ -10,12 +10,12 @@ from stable_baselines3.common.env_checker import check_env as sb3_check_env
 
 import pincer_controller
 from bowling_scene import make_bowling_xml
-from bowling_simple import BowlingEnv
+from bowling_simple import BowlingSimple
 
 
 class BowlingEnvironmentTest(unittest.TestCase):
     def test_bowling_scene_object_queries(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         ids = env._pin_ids + env._cube_geom_ids + env._pin_head_ids
 
         for id in ids:
@@ -24,7 +24,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             assert env.data.geom_xpos[id] is not None
 
     def test_gymnasium_and_sb3_environment_checks(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -40,7 +40,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
         )
 
     def test_reset_restores_full_episode_state(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         try:
             expected_qpos0 = env.bowling_scene.qpos0.copy()
             env.data.qpos[:] += 0.1
@@ -70,7 +70,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_seeded_reset_randomizes_pincer_near_pin_rack(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             env.reset(seed=123)
             first_xy = env.data.xpos[env._ee.body_id, :2].copy()
@@ -95,7 +95,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_observation_contains_fixed_order_pin_state(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             observation, _ = env.reset()
             state = observation["observation.state"]
@@ -118,7 +118,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_pin_velocities_are_relative_to_pincer(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             env.reset()
             pincer_dof = int(env.bowling_scene.jnt_dofadr[env._ee.object_joint_id])
@@ -159,7 +159,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_pin_fallen_flag_updates_in_its_fixed_block(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             env.reset()
             pin_index = 2
@@ -188,7 +188,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_timeout_is_truncation_not_termination(self) -> None:
-        env = BowlingEnv(max_steps=2)
+        env = BowlingSimple(max_steps=2)
         action = np.zeros(7, dtype=np.float32)
         try:
             env.reset()
@@ -202,7 +202,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_rotation_has_no_extra_penalty_beyond_action_penalty(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             env.reset()
             positive_action = np.zeros(7, dtype=np.float32)
@@ -222,7 +222,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_distance_ignores_fallen_pins(self) -> None:
-        env = BowlingEnv(num_pins=2)
+        env = BowlingSimple(num_pins=2)
         try:
             env.reset()
             fallen_pin_id, standing_pin_id = env._pin_ids
@@ -252,7 +252,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_distance_targets_mid_pin_and_target_stays_stable(self) -> None:
-        env = BowlingEnv(num_pins=2)
+        env = BowlingSimple(num_pins=2)
         try:
             env.reset(seed=1)
             target_pin_id = env._target_pin_id
@@ -271,19 +271,19 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_distance_reward_tracks_signed_progress(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         action = np.zeros(7, dtype=np.float32)
         try:
             env.reset()
             env._previous_pin_distance = 1.0
-            env._relevant_pin_distance = lambda: 0.75
+            env._relevant_pin_distance = lambda: 0.75  # type: ignore[method-assign]
             _, _, _, _, info = env.step(action)
             self.assertAlmostEqual(info["reward.distance"], 0.25 * env.DISTANCE_SCALE)
 
             _, _, _, _, info = env.step(action)
             self.assertEqual(info["reward.distance"], 0.0)
 
-            env._relevant_pin_distance = lambda: 1.0
+            env._relevant_pin_distance = lambda: 1.0  # type: ignore[method-assign]
             _, _, _, _, info = env.step(action)
             self.assertAlmostEqual(
                 info["reward.distance"],
@@ -293,10 +293,10 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_action_penalty_uses_normalized_full_action(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         try:
             env.reset()
-            env._relevant_pin_distance = lambda: env._previous_pin_distance
+            env._relevant_pin_distance = lambda: env._previous_pin_distance  # type: ignore[method-assign]
             action = env.action_space.high.copy()
             _, _, _, _, info = env.step(action)
             self.assertAlmostEqual(
@@ -307,7 +307,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_action_space_is_symmetric_and_normalized(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             np.testing.assert_array_equal(env.action_space.low, -1.0)
             np.testing.assert_array_equal(env.action_space.high, 1.0)
@@ -315,16 +315,16 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_jaw_has_no_dedicated_shaping_reward(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         try:
             env.reset(seed=1)
-            env._relevant_pin_distance = lambda: env._previous_pin_distance
+            env._relevant_pin_distance = lambda: env._previous_pin_distance  # type: ignore[method-assign]
             closing = np.zeros(7, dtype=np.float32)
             closing[6] = -1.0
             _, _, _, _, close_info = env.step(closing)
 
             env.reset(seed=1)
-            env._relevant_pin_distance = lambda: env._previous_pin_distance
+            env._relevant_pin_distance = lambda: env._previous_pin_distance  # type: ignore[method-assign]
             opening = -closing
             _, _, _, _, open_info = env.step(opening)
 
@@ -334,22 +334,22 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_newly_fallen_pin_uses_large_bonus(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         try:
             env.reset()
-            env._fallen_pin_ids = lambda: {env._pin_ids[0]}
+            env._fallen_pin_ids = lambda: {env._pin_ids[0]}  # type: ignore[method-assign]
             _, _, _, _, info = env.step(np.zeros(7, dtype=np.float32))
             self.assertEqual(info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD)
         finally:
             env.close()
 
     def test_each_pin_fall_reward_is_paid_only_once(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         action = np.zeros(7, dtype=np.float32)
         try:
             env.reset()
             fallen_ids: set[int] = {env._pin_ids[0]}
-            env._fallen_pin_ids = lambda: fallen_ids
+            env._fallen_pin_ids = lambda: fallen_ids  # type: ignore[method-assign]
 
             _, _, _, _, first_info = env.step(action)
             fallen_ids = set()
@@ -363,12 +363,12 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_pin_touch_reward_is_paid_once_per_pin_per_episode(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         action = np.zeros(7, dtype=np.float32)
         try:
             env.reset()
             pin_id = env._pin_ids[0]
-            env._touching_pins = lambda: {pin_id}
+            env._touching_pins = lambda: {pin_id}  # type: ignore[method-assign]
 
             _, _, _, _, first_info = env.step(action)
             _, _, _, _, second_info = env.step(action)
@@ -381,11 +381,11 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_success_is_termination_not_truncation(self) -> None:
-        env = BowlingEnv(max_steps=5)
+        env = BowlingSimple(max_steps=5)
         action = np.zeros(7, dtype=np.float32)
         try:
             env.reset()
-            env._fallen_pin_ids = lambda: set(env._pin_ids)
+            env._fallen_pin_ids = lambda: set(env._pin_ids)  # type: ignore[method-assign]
             _, _, terminated, truncated, info = env.step(action)
             self.assertTrue(terminated)
             self.assertFalse(truncated)
@@ -395,7 +395,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_motion_commands_are_rate_limited(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             observation, _ = env.reset()
             initial_position = observation["observation.state"][:3].copy()
@@ -421,7 +421,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     @staticmethod
-    def _contact_names(env: BowlingEnv) -> set[frozenset[str | None]]:
+    def _contact_names(env: BowlingSimple) -> set[frozenset[str | None]]:
         return {
             frozenset(
                 (
@@ -437,7 +437,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
         }
 
     def test_ground_contact_blocks_downward_commands_and_changes_reward(self) -> None:
-        env = BowlingEnv(max_steps=200)
+        env = BowlingSimple(max_steps=200)
         try:
             env.reset()
             zero_action = np.zeros(7, dtype=np.float32)
@@ -462,7 +462,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_pincer_contact_pushes_pin_instead_of_phasing_through(self) -> None:
-        env = BowlingEnv(num_pins=1, max_steps=200)
+        env = BowlingSimple(num_pins=1, max_steps=200)
         try:
             env.reset()
             pin_id = env._pin_ids[0]
@@ -502,7 +502,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
             env.close()
 
     def test_internal_collision_excluded_and_external_contacts_work(self) -> None:
-        env = BowlingEnv()
+        env = BowlingSimple()
         try:
             env.reset()
             self.assertNotIn(frozenset(("cube_1", "cube_2")), self._contact_names(env))

@@ -13,9 +13,9 @@ Output:
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
-from typing import Any
+from pathlib import Path
+from typing import Any, Never
 
 import numpy as np
 import torch
@@ -23,7 +23,7 @@ import torch
 # Prefer the checkout next to this script over an unrelated site-packages
 # installation. The LeRobot package imports many optional policies at package
 # import time, so keep those imports lazy until a model is actually requested.
-_LOCAL_LEROBOT_SRC = Path(__file__).resolve().parent / "lerobot" / "src"
+_LOCAL_LEROBOT_SRC: Path = Path(__file__).resolve().parent / "lerobot" / "src"
 if _LOCAL_LEROBOT_SRC.is_dir() and str(_LOCAL_LEROBOT_SRC) not in sys.path:
     sys.path.insert(0, str(_LOCAL_LEROBOT_SRC))
 
@@ -49,9 +49,15 @@ def _choose_device(device: str | None) -> torch.device:
 def _validate_image(name: str, image: np.ndarray) -> np.ndarray:
     image = np.asarray(image)
     if image.ndim != 3 or image.shape[-1] != 3:
-        raise ValueError(f"{name} must have shape (height, width, 3), got {image.shape}")
+        raise ValueError(
+            f"{name} must have shape (height, width, 3), got {image.shape}"
+        )
     if image.dtype != np.uint8:
-        if np.issubdtype(image.dtype, np.floating) and image.min() >= 0 and image.max() <= 1:
+        if (
+            np.issubdtype(image.dtype, np.floating)
+            and image.min() >= 0
+            and image.max() <= 1
+        ):
             image = image * 255.0
         image = np.clip(image, 0, 255).astype(np.uint8)
     return np.ascontiguousarray(image)
@@ -70,8 +76,8 @@ class SmolVLAInference:
         from lerobot.policies import make_pre_post_processors
         from lerobot.policies.smolvla import SmolVLAPolicy
 
-        self.device = _choose_device(device)
-        self.policy_path = policy_path
+        self.device: torch.device = _choose_device(device)
+        self.policy_path: str = policy_path
         self.policy = SmolVLAPolicy.from_pretrained(policy_path)
         self.policy.to(self.device)
         self.policy.eval()
@@ -79,7 +85,7 @@ class SmolVLAInference:
         # unlike the serialized-pipeline path it does not consume overrides.
         self.policy.config.device = str(self.device)
 
-        processor_overrides = {
+        processor_overrides: dict[str, dict[str, str]] = {
             "device_processor": {"device": str(self.device)},
         }
         try:
@@ -103,7 +109,7 @@ class SmolVLAInference:
     def _validate_model_schema(self) -> None:
         input_features = self.policy.config.input_features
         output_features = self.policy.config.output_features
-        missing = [key for key in IMAGE_KEYS if key not in input_features]
+        missing: list[str] = [key for key in IMAGE_KEYS if key not in input_features]
         if missing:
             raise ValueError(f"Checkpoint is missing image inputs: {missing}")
         if STATE_KEY not in input_features:
@@ -111,12 +117,18 @@ class SmolVLAInference:
         if ACTION_KEY not in output_features:
             raise ValueError(f"Checkpoint is missing {ACTION_KEY!r}")
 
-        state_shape = tuple(getattr(input_features[STATE_KEY], "shape", ()))
-        action_shape = tuple(getattr(output_features[ACTION_KEY], "shape", ()))
+        state_shape: tuple[Never] = tuple(
+            getattr(input_features[STATE_KEY], "shape", ())
+        )
+        action_shape: tuple[Never] = tuple(
+            getattr(output_features[ACTION_KEY], "shape", ())
+        )
         if state_shape and state_shape != (STATE_DIM,):
             raise ValueError(f"Expected state shape {(STATE_DIM,)}, got {state_shape}")
         if action_shape and action_shape != (ACTION_DIM,):
-            raise ValueError(f"Expected action shape {(ACTION_DIM,)}, got {action_shape}")
+            raise ValueError(
+                f"Expected action shape {(ACTION_DIM,)}, got {action_shape}"
+            )
 
     def reset(self) -> None:
         """Clear SmolVLA temporal/action queues at episode start."""
@@ -154,7 +166,9 @@ class SmolVLAInference:
             action = action.detach().cpu().numpy()
         action = np.asarray(action, dtype=np.float32).squeeze()
         if action.shape != (ACTION_DIM,):
-            raise ValueError(f"Model returned action shape {action.shape}, expected {(ACTION_DIM,)}")
+            raise ValueError(
+                f"Model returned action shape {action.shape}, expected {(ACTION_DIM,)}"
+            )
         if not np.all(np.isfinite(action)):
             raise ValueError(f"Model returned non-finite action: {action}")
         return action
@@ -170,18 +184,24 @@ def _load_rgb(path: str) -> np.ndarray:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run one standalone SmolVLA inference step")
-    parser.add_argument("--policy", required=True, help="Checkpoint path or Hugging Face model ID")
+    parser = argparse.ArgumentParser(
+        description="Run one standalone SmolVLA inference step"
+    )
+    parser.add_argument(
+        "--policy", required=True, help="Checkpoint path or Hugging Face model ID"
+    )
     parser.add_argument("--laptop-image", required=True)
     parser.add_argument("--phone-image", required=True)
-    parser.add_argument("--state", required=True, nargs=STATE_DIM, type=float, metavar="S")
+    parser.add_argument(
+        "--state", required=True, nargs=STATE_DIM, type=float, metavar="S"
+    )
     parser.add_argument("--task", required=True)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or mps")
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     model = SmolVLAInference(args.policy, args.device)
     model.reset()
-    action = model.predict(
+    action: np.ndarray[tuple[Any, ...], np.dtype[Any]] = model.predict(
         laptop_image=_load_rgb(args.laptop_image),
         phone_image=_load_rgb(args.phone_image),
         state=np.asarray(args.state, dtype=np.float32),

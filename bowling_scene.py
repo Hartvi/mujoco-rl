@@ -1,4 +1,5 @@
 """MuJoCo scene construction for the bowling task."""
+
 from __future__ import annotations
 
 
@@ -20,14 +21,18 @@ def _panda_xml() -> str:
     The geometry is intentionally primitive so the environment has no mesh
     download/runtime dependency. Joint and site names match a Panda-style API.
     """
-    colors = [
-        "0.15 0.15 0.18 1", "0.85 0.85 0.88 1", "0.15 0.15 0.18 1",
-        "0.85 0.85 0.88 1", "0.15 0.15 0.18 1", "0.85 0.85 0.88 1",
+    colors: list[str] = [
+        "0.15 0.15 0.18 1",
+        "0.85 0.85 0.88 1",
+        "0.15 0.15 0.18 1",
+        "0.85 0.85 0.88 1",
+        "0.15 0.15 0.18 1",
+        "0.85 0.85 0.88 1",
         "0.15 0.15 0.18 1",
     ]
-    axes = ["0 0 1", "0 1 0", "0 1 0", "0 0 1", "0 1 0", "0 0 1", "0 1 0"]
+    axes: list[str] = ["0 0 1", "0 1 0", "0 1 0", "0 0 1", "0 1 0", "0 0 1", "0 1 0"]
     # A compact serial arm along +x. The IK controller operates on its site.
-    tail = '''
+    tail = """
           <site name="panda_hand" pos="0.12 0 0" size="0.035" rgba="0.1 0.8 0.1 1"/>
           <geom name="panda_gripper_palm" type="box" pos="0.08 0 0" size="0.08 0.10 0.045" rgba="0.12 0.12 0.14 1"/>
           <body name="panda_finger_left" pos="0.16 0.07 0">
@@ -38,9 +43,9 @@ def _panda_xml() -> str:
             <joint name="panda_finger_joint2" type="slide" axis="0 -1 0" range="0 0.04"/>
             <geom type="box" pos="0.05 0 0" size="0.06 0.018 0.018" rgba="0.75 0.75 0.78 1"/>
           </body>
-        </body>'''
+        </body>"""
     # Construct the nested serial chain explicitly.
-    chain = ""
+    chain: str = ""
     for i, (axis, color) in enumerate(zip(axes, colors), start=1):
         chain += f'''
         <body name="panda_link{i}" pos="0.19 0 0">
@@ -49,11 +54,11 @@ def _panda_xml() -> str:
     chain += tail
     # The hand fragment closes link 7; close the remaining six links here.
     chain += "</body>" * 6
-    return f'''
+    return f"""
     <body name="panda" pos="-3.15 0 0.35">
       <geom name="panda_base" type="cylinder" size="0.18 0.12" rgba="0.12 0.12 0.14 1"/>
       {chain}
-    </body>'''
+    </body>"""
 
 
 def _pincer_xml() -> str:
@@ -76,15 +81,19 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
     positions = []
     spacing = 0.27
     for row in range(4):
-        x = 1.25 + row * spacing * 0.86
+        x: float = 1.25 + row * spacing * 0.86
         for column in range(row + 1):
             positions.append((x, (column - row / 2.0) * spacing))
-    pins = "\n".join(_pin_xml(i + 1, x, y) for i, (x, y) in enumerate(positions))
-    pincer_constraints = """
+    pins: str = "\n".join(_pin_xml(i + 1, x, y) for i, (x, y) in enumerate(positions))
+    pincer_constraints: str = (
+        """
   <contact>
     <exclude body1="cube_1_body" body2="cube_2_body"/>
-  </contact>""" if include_pincer else ""
-    return f'''<mujoco model="bowling_panda">
+  </contact>"""
+        if include_pincer
+        else ""
+    )
+    return f"""<mujoco model="bowling_panda">
   <compiler angle="radian" autolimits="true"/>
   <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" iterations="80" solver="Newton"/>
   <size njmax="2000" nconmax="1000"/>
@@ -109,6 +118,6 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
   {pincer_constraints}
 
   <actuator>
-    {((''.join(f'<position name="panda_motor{i}" joint="panda_joint{i}" kp="150" kv="20" ctrlrange="-2.9 2.9"/>' for i in range(1, 8)) + '<position name="panda_finger_motor1" joint="panda_finger_joint1" kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>') if not include_pincer else '<position name="distance_command" joint="cube_distance" kp="100" ctrllimited="true" ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>')}
+    {(("".join(f'<position name="panda_motor{i}" joint="panda_joint{i}" kp="150" kv="20" ctrlrange="-2.9 2.9"/>' for i in range(1, 8)) + '<position name="panda_finger_motor1" joint="panda_finger_joint1" kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>') if not include_pincer else '<position name="distance_command" joint="cube_distance" kp="100" ctrllimited="true" ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>')}
   </actuator>
-</mujoco>'''
+</mujoco>"""

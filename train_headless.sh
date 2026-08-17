@@ -1,6 +1,6 @@
 /home/hartvi/venvs/ros2-torch/bin/python train_pincer_sb3.py \
     --total-timesteps 1000000 \
-    --n-envs 8 \
+    --n-envs 16 \
     --episode-max-steps 500 \
     --output-dir runs/pincer_sb3 \
     --gamma 0.99 \

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
 import time
+from typing import Any, ClassVar
 
 import gymnasium as gym
 import mujoco
@@ -15,8 +15,11 @@ from bowling_scene import make_bowling_xml
 from pincer_controller import PincerController
 
 
-class BowlingEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
+class BowlingSimple(gym.Env):
+    metadata: ClassVar[dict[str, Any]] = {
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": 30,
+    }
     FRAME_SKIP = 50
     PINCER_STATE_SIZE = 8
     PIN_STATE_SIZE = 14
@@ -35,18 +38,25 @@ class BowlingEnv(gym.Env):
     TIME_PENALTY = 0.002
 
     def __init__(
-        self, render_mode: str | None = None, max_steps: int = 500, num_pins: int = 10
-    ):
+        self,
+        render_mode: str | None = None,
+        max_steps: int = 500,
+        num_pins: int = 10,
+        part: str | None = None,
+    ) -> None:
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
         if not 1 <= num_pins <= self.MAX_PINS:
             raise ValueError(f"num_pins must be between 1 and {self.MAX_PINS}")
+        if part not in ["body", "head", None]:
+            raise ValueError("part must be 'body', 'head', or None")
         self.render_mode = render_mode
-        self.max_steps = max_steps
-        self.num_pins = num_pins
-        self.bowling_scene = mujoco.MjModel.from_xml_string(
+        self.max_steps: int = max_steps
+        self.num_pins: int = num_pins
+        self.bowling_scene: mujoco.MjModel = mujoco.MjModel.from_xml_string(
             make_bowling_xml(include_pincer=True)
         )
+        self.part: str | None = part
         self.data = mujoco.MjData(self.bowling_scene)
         self._viewer: Any = None
         self._renderer: mujoco.Renderer | None = None
@@ -63,32 +73,34 @@ class BowlingEnv(gym.Env):
         self._ee = PincerController(
             self.bowling_scene, self.data, control_dt=self.control_dt
         )
-        self._pin_ids = [
+        self._pin_ids: list[int] = [
             mujoco.mj_name2id(self.bowling_scene, mujoco.mjtObj.mjOBJ_BODY, f"pin_{i}")
             for i in range(1, num_pins + 1)
         ]
-        self._cube_geom_ids = [
+        self._cube_geom_ids: list[int] = [
             mujoco.mj_name2id(self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, name)
             for name in ("cube_1", "cube_2")
         ]
-        self._pin_head_ids = [
+        self._pin_head_ids: list[int] = [
             mujoco.mj_name2id(
                 self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, f"pin_{i}_head"
             )
             for i in range(1, num_pins + 1)
         ]
-        self.pin2headid = dict(zip(self._pin_ids, self._pin_head_ids))
+        self.pin2headid: dict[int, int] = dict(zip(self._pin_ids, self._pin_head_ids))
         # Policy action layout: [vx, vy, vz, wx, wy, wz, jaw_velocity].
         # Each component is normalized to [-1, 1] and converted to a pose
         # delta using the controller's physical rate limits and control_dt.
         self.action_space = spaces.Box(-1.0, 1.0, shape=(7,), dtype=np.float32)
-        self._action_delta_scale = np.array(
-            [self._ee.max_translation_delta] * 3
-            + [self._ee.max_rotation_delta] * 3
-            + [self._ee.max_distance_delta],
-            dtype=np.float64,
+        self._action_delta_scale: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = (
+            np.array(
+                [self._ee.max_translation_delta] * 3
+                + [self._ee.max_rotation_delta] * 3
+                + [self._ee.max_distance_delta],
+                dtype=np.float64,
+            )
         )
-        observation_size = self.PINCER_STATE_SIZE + self.PIN_STATE_SIZE * num_pins
+        observation_size: int = self.PINCER_STATE_SIZE + self.PIN_STATE_SIZE * num_pins
         self.observation_space = spaces.Dict(
             {
                 "observation.state": spaces.Box(
@@ -114,13 +126,13 @@ class BowlingEnv(gym.Env):
 
     def _touching_pins(self) -> set[int]:
         touching = set()
-        cube_geom_ids = set(self._cube_geom_ids)
-        pin_body_ids = set(self._pin_ids)
+        cube_geom_ids: set[int] = set(self._cube_geom_ids)
+        pin_body_ids: set[int] = set(self._pin_ids)
         for contact in self.data.contact:
             geom1 = int(contact.geom1)
             geom2 = int(contact.geom2)
             if geom1 in cube_geom_ids:
-                other_geom = geom2
+                other_geom: int = geom2
             elif geom2 in cube_geom_ids:
                 other_geom = geom1
             else:
@@ -142,7 +154,7 @@ class BowlingEnv(gym.Env):
 
     def _select_target_pin(self, fallen_pin_ids: set[int]) -> None:
         pincer_position = self.data.xpos[self._ee.body_id]
-        candidates = [
+        candidates: list[int] = [
             body_id for body_id in self._pin_ids if body_id not in fallen_pin_ids
         ]
         self._target_pin_id = min(
@@ -153,34 +165,35 @@ class BowlingEnv(gym.Env):
             default=None,
         )
 
-    def _relevant_pin_distance(self, part: str | None = None) -> float:
+    def _relevant_pin_distance(self) -> float:
         if self._target_pin_id is None:
             return 0.0
-        if part is None:
+        if self.part is None:
             return float(
                 np.linalg.norm(
                     self._strike_point(self._target_pin_id)
                     - self.data.xpos[self._ee.body_id]
                 )
             )
-        else:
+        elif self.part == "head":
             return float(
                 np.linalg.norm(
-                    self._strike_point(self.pin2headid[self._target_pin_id])
+                    self.data.xpos[self.pin2headid[self._target_pin_id]]
                     - self.data.xpos[self._ee.body_id]
                 )
             )
+        raise ValueError(f"Unknown part: {self.part}")
 
     def _random_pincer_start_xy(self) -> np.ndarray:
-        pin_positions = np.asarray(
+        pin_positions: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.asarray(
             [self.data.xpos[body_id, :2] for body_id in self._pin_ids]
         )
         rack_center = pin_positions.mean(axis=0)
         best_candidate = rack_center.copy()
-        best_clearance = -np.inf
+        best_clearance: float = -np.inf
         for _ in range(100):
             radius = self.START_RADIUS * np.sqrt(self.np_random.random())
-            angle = self.np_random.uniform(0.0, 2.0 * np.pi)
+            angle: float = self.np_random.uniform(0.0, 2.0 * np.pi)
             candidate = rack_center + radius * np.array([np.cos(angle), np.sin(angle)])
             clearance = float(np.min(np.linalg.norm(pin_positions - candidate, axis=1)))
             if clearance >= self.START_PIN_CLEARANCE:
@@ -212,7 +225,9 @@ class BowlingEnv(gym.Env):
         return self._get_observation(), {"fallen_pins": 0, "task": self.task}
 
     def _body_velocity(self, body_id: int) -> np.ndarray:
-        velocity = np.zeros(6, dtype=np.float64)
+        velocity: np.ndarray[tuple[int], np.dtype[np.float64]] = np.zeros(
+            6, dtype=np.float64
+        )
         mujoco.mj_objectVelocity(
             self.bowling_scene,
             self.data,
@@ -251,14 +266,16 @@ class BowlingEnv(gym.Env):
         relative_position = world_to_pincer @ (
             self.data.xpos[body_id] - pincer_position
         )
-        relative_quat = self._quat_mul(
+        relative_quat: np.ndarray[tuple[Any, ...], np.dtype[Any]] = self._quat_mul(
             self._quat_conjugate(pincer_quat),
             self.data.xquat[body_id],
         )
         if relative_quat[0] < 0.0:
             relative_quat *= -1.0
 
-        pin_velocity = self._body_velocity(body_id)
+        pin_velocity: np.ndarray[tuple[Any, ...], np.dtype[Any]] = self._body_velocity(
+            body_id
+        )
         relative_angular_velocity = world_to_pincer @ (
             pin_velocity[:3] - pincer_velocity[:3]
         )
@@ -286,7 +303,7 @@ class BowlingEnv(gym.Env):
         )
 
     def _get_observation(self) -> dict[str, np.ndarray]:
-        pincer_state = np.concatenate(
+        pincer_state: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.concatenate(
             (
                 self._ee.observation(),
                 [self._last_action_dt],
@@ -296,8 +313,10 @@ class BowlingEnv(gym.Env):
         pincer_rotation = self.data.xmat[self._ee.body_id].reshape(3, 3)
         world_to_pincer = pincer_rotation.T
         pincer_quat = self.data.xquat[self._ee.body_id]
-        pincer_velocity = self._body_velocity(self._ee.body_id)
-        pin_states = [
+        pincer_velocity: np.ndarray[tuple[Any, ...], np.dtype[Any]] = (
+            self._body_velocity(self._ee.body_id)
+        )
+        pin_states: list[np.ndarray[tuple[Any, ...], np.dtype[Any]]] = [
             self._pin_observation(
                 body_id,
                 pincer_position,
@@ -326,44 +345,46 @@ class BowlingEnv(gym.Env):
         self._last_action_dt = float(self.data.time - action_time)
         self._last_action_time = float(self.data.time)
         self._step_count += 1
-        fallen_pin_ids = self._fallen_pin_ids()
-        fallen = len(fallen_pin_ids)
-        terminated = fallen == self.num_pins
-        truncated = self._step_count >= self.max_steps
-        target_fell = self._target_pin_id in fallen_pin_ids
+        fallen_pin_ids: set[int] = self._fallen_pin_ids()
+        fallen: int = len(fallen_pin_ids)
+        terminated: bool = fallen == self.num_pins
+        truncated: bool = self._step_count >= self.max_steps
+        target_fell: bool = self._target_pin_id in fallen_pin_ids
         if target_fell:
             self._select_target_pin(fallen_pin_ids)
-            pin_distance = self._relevant_pin_distance()
+            pin_distance: float = self._relevant_pin_distance()
             distance_reward = 0.0
         else:
             pin_distance = self._relevant_pin_distance()
-            distance_progress = self._previous_pin_distance - pin_distance
-            distance_multiplier = (
+            distance_progress: float = self._previous_pin_distance - pin_distance
+            distance_multiplier: float = (
                 self.AWAY_DISTANCE_MULTIPLIER if distance_progress < 0.0 else 1.0
             )
             distance_reward = (
                 self.DISTANCE_SCALE * distance_multiplier * distance_progress
             )
         self._previous_pin_distance = pin_distance
-        ground_clearance = self._pincer_ground_clearance()
-        ground_reward = -self.GROUND_PENALTY_SCALE * max(
+        ground_clearance: float = self._pincer_ground_clearance()
+        ground_reward: float = -self.GROUND_PENALTY_SCALE * max(
             0.0, self.MIN_GROUND_CLEARANCE - ground_clearance
         )
         rotation_reward = 0.0
-        action_reward = -self.ACTION_PENALTY_SCALE * float(np.dot(action, action))
-        newly_fallen_pin_ids = fallen_pin_ids - self._rewarded_fallen_pins
-        newly_fallen = len(newly_fallen_pin_ids)
-        fallen_reward = self.NEWLY_FALLEN_REWARD * float(newly_fallen)
+        action_reward: float = -self.ACTION_PENALTY_SCALE * float(
+            np.dot(action, action)
+        )
+        newly_fallen_pin_ids: set[int] = fallen_pin_ids - self._rewarded_fallen_pins
+        newly_fallen: int = len(newly_fallen_pin_ids)
+        fallen_reward: float = self.NEWLY_FALLEN_REWARD * float(newly_fallen)
         self._rewarded_fallen_pins.update(newly_fallen_pin_ids)
         self._previous_fallen = fallen
-        touching_pins = self._touching_pins()
-        newly_touched_pins = touching_pins - self._touched_pins
+        touching_pins: set[int] = self._touching_pins()
+        newly_touched_pins: set[int] = touching_pins - self._touched_pins
         self._touched_pins.update(touching_pins)
-        touch_reward = self.PIN_TOUCH_REWARD * float(len(newly_touched_pins))
-        success_reward = self.SUCCESS_REWARD if terminated else 0.0
+        touch_reward: float = self.PIN_TOUCH_REWARD * float(len(newly_touched_pins))
+        success_reward: float = self.SUCCESS_REWARD if terminated else 0.0
         open_close_reward = 0.0
-        time_reward = -self.TIME_PENALTY
-        reward = (
+        time_reward: float = -self.TIME_PENALTY
+        reward: float = (
             distance_reward
             + fallen_reward
             + open_close_reward
@@ -408,7 +429,7 @@ class BowlingEnv(gym.Env):
         self._renderer.update_scene(self.data, camera=camera_name)
         return self._renderer.render().copy()
 
-    def render(self):
+    def render(self) -> np.ndarray | None:
         if self.render_mode == "rgb_array":
             return self._render_camera("laptop_camera")
         if self.render_mode == "human":
@@ -417,8 +438,9 @@ class BowlingEnv(gym.Env):
                     self.bowling_scene, self.data
                 )
             self._viewer.sync()
+        return None
 
-    def close(self):
+    def close(self) -> None:
         if self._viewer is not None:
             self._viewer.close()
         if self._renderer is not None:
@@ -428,7 +450,7 @@ class BowlingEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = BowlingEnv(render_mode="human")
+    env = BowlingSimple(render_mode="human")
     try:
         env.reset()
         while env._viewer is None or env._viewer.is_running():

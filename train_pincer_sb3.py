@@ -1,4 +1,5 @@
 """Primary Stable-Baselines3 PPO training entry point for pincer bowling."""
+
 from __future__ import annotations
 
 import argparse
@@ -19,9 +20,8 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
-from bowling_simple import BowlingEnv
+from bowling_simple import BowlingSimple
 from pincer_controller import PincerController
-
 
 REWARD_KEYS = (
     "reward.distance",
@@ -38,7 +38,7 @@ REWARD_KEYS = (
 def make_env(episode_max_steps: int, seed: int, monitor_path: Path | None):
     def factory():
         env = gym.wrappers.FlattenObservation(
-            BowlingEnv(max_steps=episode_max_steps)
+            BowlingSimple(max_steps=episode_max_steps)
         )
         env = Monitor(
             env,
@@ -57,7 +57,7 @@ class RewardLoggingCallback(BaseCallback):
 
     def __init__(self) -> None:
         super().__init__()
-        self.values = {key: [] for key in REWARD_KEYS}
+        self.values: dict[str, list[float]] = {key: [] for key in REWARD_KEYS}
         self.fallen: list[float] = []
         self.distances: list[float] = []
 
@@ -148,11 +148,17 @@ def train(args: argparse.Namespace) -> None:
         train_env.training = True
         train_env.norm_reward = False
     else:
-        train_env = VecNormalize(train_base, norm_obs=True, norm_reward=False, clip_obs=10.0)
+        train_env = VecNormalize(
+            train_base, norm_obs=True, norm_reward=False, clip_obs=10.0
+        )
 
-    eval_base = DummyVecEnv([
-        make_env(args.episode_max_steps, args.seed + 10_000, output_dir / "eval_monitor")
-    ])
+    eval_base = DummyVecEnv(
+        [
+            make_env(
+                args.episode_max_steps, args.seed + 10_000, output_dir / "eval_monitor"
+            )
+        ]
+    )
     eval_env = VecNormalize(eval_base, training=False, norm_obs=True, norm_reward=False)
 
     policy_kwargs = {
@@ -189,33 +195,33 @@ def train(args: argparse.Namespace) -> None:
             tensorboard_log=tensorboard_log,
         )
 
-    callbacks = CallbackList([
-        RewardLoggingCallback(),
-        CheckpointCallback(
-            save_freq=max(args.checkpoint_freq // args.n_envs, 1),
-            save_path=str(checkpoint_dir),
-            name_prefix="pincer",
-            save_vecnormalize=True,
-            verbose=1,
-        ),
-        EvalCallback(
-            eval_env,
-            callback_on_new_best=SaveBestVecNormalizeCallback(
-                best_dir / "vecnormalize.pkl"
+    callbacks = CallbackList(
+        [
+            RewardLoggingCallback(),
+            CheckpointCallback(
+                save_freq=max(args.checkpoint_freq // args.n_envs, 1),
+                save_path=str(checkpoint_dir),
+                name_prefix="pincer",
+                save_vecnormalize=True,
+                verbose=1,
             ),
-            best_model_save_path=str(best_dir),
-            log_path=str(output_dir / "evaluations"),
-            eval_freq=max(args.eval_freq // args.n_envs, 1),
-            n_eval_episodes=args.eval_episodes,
-            deterministic=True,
-            verbose=1,
-        ),
-    ])
+            EvalCallback(
+                eval_env,
+                callback_on_new_best=SaveBestVecNormalizeCallback(
+                    best_dir / "vecnormalize.pkl"
+                ),
+                best_model_save_path=str(best_dir),
+                log_path=str(output_dir / "evaluations"),
+                eval_freq=max(args.eval_freq // args.n_envs, 1),
+                n_eval_episodes=args.eval_episodes,
+                deterministic=True,
+                verbose=1,
+            ),
+        ]
+    )
 
     config = vars(args).copy()
-    config["action_semantics"] = [
-        "vx", "vy", "vz", "wx", "wy", "wz", "jaw_velocity"
-    ]
+    config["action_semantics"] = ["vx", "vy", "vz", "wx", "wy", "wz", "jaw_velocity"]
     config["physical_rate_limits"] = {
         "translation_m_per_s": PincerController.MAX_LINEAR_SPEED,
         "rotation_rad_per_s": PincerController.MAX_ANGULAR_SPEED,

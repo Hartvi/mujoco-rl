@@ -1,18 +1,45 @@
 from __future__ import annotations
+
 import argparse
 import csv
 from collections import deque
+
 import torch
-from bowling_simple import BowlingEnv
+
+from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
 
+
 def train(args):
-    env = BowlingEnv(render_mode="human" if args.render else None, max_steps=args.episode_max_steps)
-    log_file = open(args.log_file, "w", newline="")
-    log_writer = csv.DictWriter(log_file, fieldnames=["update", "mean_reward", "distance_reward", "fallen_reward", "newly_fallen_pins", "open_close_reward", "rotation_reward", "ground_reward", "mean_pin_distance", "max_fallen_pins", "rolling50_mean_reward", "rolling50_mean_progress", "rolling50_fallen_per_update"])
+    env = BowlingSimple(
+        render_mode="human" if args.render else None, max_steps=args.episode_max_steps
+    )
+    log_file = open(args.log_file, "w", newline="")  # noqa: SIM115
+    log_writer = csv.DictWriter(
+        log_file,
+        fieldnames=[
+            "update",
+            "mean_reward",
+            "distance_reward",
+            "fallen_reward",
+            "newly_fallen_pins",
+            "open_close_reward",
+            "rotation_reward",
+            "ground_reward",
+            "mean_pin_distance",
+            "max_fallen_pins",
+            "rolling50_mean_reward",
+            "rolling50_mean_progress",
+            "rolling50_fallen_per_update",
+        ],
+    )
     log_writer.writeheader()
     device = torch.device(args.device)
-    model = PincerMLP(observation_dim=env.observation_space["observation.state"].shape[0], action_low=env.action_space.low, action_high=env.action_space.high).to(device)
+    model = PincerMLP(
+        observation_dim=env.observation_space["observation.state"].shape[0],
+        action_low=env.action_space.low,
+        action_high=env.action_space.high,
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     observation, _ = env.reset(seed=args.seed)
     total_steps = 0
@@ -22,12 +49,25 @@ def train(args):
     interval_rewards, interval_progress, interval_fallen = [], [], []
 
     for update in range(args.updates):
-        states, raw_actions, old_log_probs, rewards, dones, values = [], [], [], [], [], []
-        distance_rewards, fallen_rewards, open_close_rewards, pin_distances, fallen_counts = [], [], [], [], []
+        states, raw_actions, old_log_probs, rewards, dones, values = (
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
+        (
+            distance_rewards,
+            fallen_rewards,
+            open_close_rewards,
+            pin_distances,
+            fallen_counts,
+        ) = ([], [], [], [], [])
         rotation_rewards, ground_rewards = [], []
         newly_fallen_counts = []
 
-        for step in range(args.horizon):
+        for _ in range(args.horizon):
             state = model.prepare_observation(observation, update=True).unsqueeze(0)
             with torch.no_grad():
                 action, log_prob, value, raw = model.action_and_value(state)
@@ -50,35 +90,61 @@ def train(args):
             ground_rewards.append(info["reward.ground_clearance"])
             pin_distances.append(info["distance.relevant_pin"])
             fallen_counts.append(info["fallen_pins"])
-            states.append(state[0].cpu()); raw_actions.append(raw[0].cpu()); old_log_probs.append(log_prob[0].cpu())
-            rewards.append(reward); dones.append(float(terminated or truncated)); values.append(value[0].cpu())
+            states.append(state[0].cpu())
+            raw_actions.append(raw[0].cpu())
+            old_log_probs.append(log_prob[0].cpu())
+            rewards.append(reward)
+            dones.append(float(terminated or truncated))
+            values.append(value[0].cpu())
             if terminated or truncated:
                 observation, _ = env.reset()
 
-        states = torch.stack(states).to(device); raw_actions = torch.stack(raw_actions).to(device)
-        old_log_probs = torch.stack(old_log_probs).to(device); rewards = torch.as_tensor(rewards, dtype=torch.float32, device=device)
-        dones = torch.as_tensor(dones, dtype=torch.float32, device=device); values = torch.stack(values).to(device)
+        states = torch.stack(states).to(device)
+        raw_actions = torch.stack(raw_actions).to(device)
+        old_log_probs = torch.stack(old_log_probs).to(device)
+        rewards = torch.as_tensor(rewards, dtype=torch.float32, device=device)
+        dones = torch.as_tensor(dones, dtype=torch.float32, device=device)
+        values = torch.stack(values).to(device)
         with torch.no_grad():
             last = model.prepare_observation(observation).unsqueeze(0)
             next_value = model.value(last)[0]
 
-        advantages = torch.zeros_like(rewards); gae = torch.zeros((), device=device)
+        advantages = torch.zeros_like(rewards)
+        gae = torch.zeros((), device=device)
         for t in reversed(range(args.horizon)):
-            nonterminal = 1.0 - dones[t]; next_v = next_value if t == args.horizon - 1 else values[t + 1]
-            gae = rewards[t] + args.gamma * nonterminal * next_v - values[t] + args.gamma * args.gae_lambda * nonterminal * gae
+            nonterminal = 1.0 - dones[t]
+            next_v = next_value if t == args.horizon - 1 else values[t + 1]
+            gae = (
+                rewards[t]
+                + args.gamma * nonterminal * next_v
+                - values[t]
+                + args.gamma * args.gae_lambda * nonterminal * gae
+            )
             advantages[t] = gae
 
         returns = advantages + values
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         for _ in range(args.epochs):
-            for indices in torch.randperm(args.horizon, device=device).split(args.batch_size):
-                _, log_prob, value, _ = model.action_and_value(states[indices], raw_actions[indices])
-                ratio = (log_prob - old_log_probs[indices]).exp(); clipped = torch.clamp(ratio, 1 - args.clip, 1 + args.clip)
+            for indices in torch.randperm(args.horizon, device=device).split(
+                args.batch_size
+            ):
+                _, log_prob, value, _ = model.action_and_value(
+                    states[indices], raw_actions[indices]
+                )
+                ratio = (log_prob - old_log_probs[indices]).exp()
+                clipped = torch.clamp(ratio, 1 - args.clip, 1 + args.clip)
                 entropy = model.distribution(states[indices]).entropy().sum(-1).mean()
-                loss = (-torch.min(ratio * advantages[indices], clipped * advantages[indices]).mean()
-                        + args.value_coef * 0.5 * (returns[indices] - value).square().mean()
-                        - args.entropy_coef * entropy)
-                optimizer.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); optimizer.step()
+                loss = (
+                    -torch.min(
+                        ratio * advantages[indices], clipped * advantages[indices]
+                    ).mean()
+                    + args.value_coef * 0.5 * (returns[indices] - value).square().mean()
+                    - args.entropy_coef * entropy
+                )
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
 
         mean_reward = float(rewards.mean().item())
         mean_progress = float(sum(distance_rewards) / len(distance_rewards))
@@ -90,21 +156,27 @@ def train(args):
         interval_progress.append(mean_progress)
         interval_fallen.append(newly_fallen_pins)
 
-        log_writer.writerow({
-            "update": update,
-            "mean_reward": mean_reward,
-            "distance_reward": mean_progress,
-            "fallen_reward": float(sum(fallen_rewards) / len(fallen_rewards)),
-            "newly_fallen_pins": newly_fallen_pins,
-            "open_close_reward": float(sum(open_close_rewards) / len(open_close_rewards)),
-            "rotation_reward": float(sum(rotation_rewards) / len(rotation_rewards)),
-            "ground_reward": float(sum(ground_rewards) / len(ground_rewards)),
-            "mean_pin_distance": float(sum(pin_distances) / len(pin_distances)),
-            "max_fallen_pins": max(fallen_counts),
-            "rolling50_mean_reward": sum(rolling_rewards) / len(rolling_rewards),
-            "rolling50_mean_progress": sum(rolling_progress) / len(rolling_progress),
-            "rolling50_fallen_per_update": sum(rolling_fallen) / len(rolling_fallen),
-        })
+        log_writer.writerow(
+            {
+                "update": update,
+                "mean_reward": mean_reward,
+                "distance_reward": mean_progress,
+                "fallen_reward": float(sum(fallen_rewards) / len(fallen_rewards)),
+                "newly_fallen_pins": newly_fallen_pins,
+                "open_close_reward": float(
+                    sum(open_close_rewards) / len(open_close_rewards)
+                ),
+                "rotation_reward": float(sum(rotation_rewards) / len(rotation_rewards)),
+                "ground_reward": float(sum(ground_rewards) / len(ground_rewards)),
+                "mean_pin_distance": float(sum(pin_distances) / len(pin_distances)),
+                "max_fallen_pins": max(fallen_counts),
+                "rolling50_mean_reward": sum(rolling_rewards) / len(rolling_rewards),
+                "rolling50_mean_progress": sum(rolling_progress)
+                / len(rolling_progress),
+                "rolling50_fallen_per_update": sum(rolling_fallen)
+                / len(rolling_fallen),
+            }
+        )
         log_file.flush()
         if (update + 1) % args.print_every == 0 or update == args.updates - 1:
             print(
@@ -123,18 +195,46 @@ def train(args):
             interval_fallen.clear()
             model.save(args.checkpoint)
     log_file.close()
-    env.close(); model.save(args.checkpoint)
+    env.close()
+    model.save(args.checkpoint)
+
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--updates", type=int, default=1000); p.add_argument("--horizon", type=int, default=512); p.add_argument("--episode-max-steps", type=int, default=500)
-    p.add_argument("--batch-size", type=int, default=128); p.add_argument("--epochs", type=int, default=4)
-    p.add_argument("--learning-rate", type=float, default=3e-4); p.add_argument("--gamma", type=float, default=.99)
-    p.add_argument("--gae-lambda", type=float, default=.95); p.add_argument("--clip", type=float, default=.2)
-    p.add_argument("--value-coef", type=float, default=.5); p.add_argument("--checkpoint", default="pincer_mlp.pt")
-    p.add_argument("--entropy-coef", type=float, default=.01)
-    p.add_argument("--device", default="cuda"); p.add_argument("--seed", type=int, default=0); p.add_argument("--print-every", type=int, default=10); p.add_argument("--render", action="store_true", help="show the MuJoCo viewer during training"); p.add_argument("--log-actions", action="store_true", help="periodically print compact action and pincer state summaries"); p.add_argument("--log-every", type=int, default=500, help="simulator steps between optional action logs"); p.add_argument("--log-file", default="training_rewards.csv", help="CSV file for reward metrics")
+    p.add_argument("--updates", type=int, default=1000)
+    p.add_argument("--horizon", type=int, default=512)
+    p.add_argument("--episode-max-steps", type=int, default=500)
+    p.add_argument("--batch-size", type=int, default=128)
+    p.add_argument("--epochs", type=int, default=4)
+    p.add_argument("--learning-rate", type=float, default=3e-4)
+    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--gae-lambda", type=float, default=0.95)
+    p.add_argument("--clip", type=float, default=0.2)
+    p.add_argument("--value-coef", type=float, default=0.5)
+    p.add_argument("--checkpoint", default="pincer_mlp.pt")
+    p.add_argument("--entropy-coef", type=float, default=0.01)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--print-every", type=int, default=10)
+    p.add_argument(
+        "--render", action="store_true", help="show the MuJoCo viewer during training"
+    )
+    p.add_argument(
+        "--log-actions",
+        action="store_true",
+        help="periodically print compact action and pincer state summaries",
+    )
+    p.add_argument(
+        "--log-every",
+        type=int,
+        default=500,
+        help="simulator steps between optional action logs",
+    )
+    p.add_argument(
+        "--log-file", default="training_rewards.csv", help="CSV file for reward metrics"
+    )
     train(p.parse_args())
+
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,5 @@
 """Evaluate an SB3 pincer policy and simple bowling baselines."""
+
 from __future__ import annotations
 
 import argparse
@@ -13,7 +14,7 @@ import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-from bowling_simple import BowlingEnv
+from bowling_simple import BowlingSimple
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class EpisodeResult:
     success: bool
 
 
-ActionFunction = Callable[[dict[str, np.ndarray], BowlingEnv], np.ndarray]
+ActionFunction = Callable[[dict[str, np.ndarray], BowlingSimple], np.ndarray]
 
 
 def load_sb3_policy(
@@ -37,14 +38,12 @@ def load_sb3_policy(
     deterministic: bool,
 ) -> ActionFunction:
     model = PPO.load(model_path, device=device)
-    probe = DummyVecEnv([
-        lambda: gym.wrappers.FlattenObservation(BowlingEnv())
-    ])
+    probe = DummyVecEnv([lambda: gym.wrappers.FlattenObservation(BowlingSimple())])
     normalizer = VecNormalize.load(stats_path, probe)
     normalizer.training = False
     normalizer.norm_reward = False
 
-    def act(observation: dict[str, np.ndarray], _env: BowlingEnv) -> np.ndarray:
+    def act(observation: dict[str, np.ndarray], _env: BowlingSimple) -> np.ndarray:
         flat = np.asarray(observation["observation.state"], dtype=np.float32)
         normalized = normalizer.normalize_obs(flat[None, :])[0]
         action, _ = model.predict(normalized, deterministic=deterministic)
@@ -56,23 +55,22 @@ def load_sb3_policy(
 
 
 def random_action(
-    _observation: dict[str, np.ndarray], env: BowlingEnv
+    _observation: dict[str, np.ndarray], env: BowlingSimple
 ) -> np.ndarray:
     return env.action_space.sample()
 
 
-def no_op_action(
-    _observation: dict[str, np.ndarray], env: BowlingEnv
-) -> np.ndarray:
+def no_op_action(_observation: dict[str, np.ndarray], env: BowlingSimple) -> np.ndarray:
     return np.zeros(env.action_space.shape, dtype=np.float32)
 
 
 def scripted_nearest_pin_action(
-    _observation: dict[str, np.ndarray], env: BowlingEnv
+    _observation: dict[str, np.ndarray], env: BowlingSimple
 ) -> np.ndarray:
     pincer = env.data.xpos[env._ee.body_id]
     upright = [
-        body_id for body_id in env._pin_ids
+        body_id
+        for body_id in env._pin_ids
         if env.data.xmat[body_id].reshape(3, 3)[2, 2] >= 0.75
     ]
     action = np.zeros(7, dtype=np.float32)
@@ -91,7 +89,7 @@ def evaluate(
     policy: ActionFunction,
     args: argparse.Namespace,
 ) -> list[EpisodeResult]:
-    env = BowlingEnv(
+    env = BowlingSimple(
         render_mode="human" if args.render else None,
         max_steps=args.episode_max_steps,
     )
@@ -170,21 +168,25 @@ def main() -> None:
     if args.episodes < 1 or args.episode_max_steps < 1:
         parser.error("episode counts and maximum steps must be positive")
 
-    policies = [(
-        "checkpoint",
-        load_sb3_policy(
-            args.model,
-            args.vecnormalize,
-            args.device,
-            deterministic=not args.stochastic,
-        ),
-    )]
+    policies = [
+        (
+            "checkpoint",
+            load_sb3_policy(
+                args.model,
+                args.vecnormalize,
+                args.device,
+                deterministic=not args.stochastic,
+            ),
+        )
+    ]
     if args.include_baselines:
-        policies.extend([
-            ("scripted-nearest", scripted_nearest_pin_action),
-            ("random", random_action),
-            ("no-op", no_op_action),
-        ])
+        policies.extend(
+            [
+                ("scripted-nearest", scripted_nearest_pin_action),
+                ("random", random_action),
+                ("no-op", no_op_action),
+            ]
+        )
 
     all_results = []
     for name, policy in policies:

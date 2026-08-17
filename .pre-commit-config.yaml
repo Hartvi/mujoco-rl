@@ -1,0 +1,62 @@
+repos:
+  # 1. Clean code formatting (Black)
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        args: ["--line-length=88"]
+
+  # 2. Sorted imports (isort)
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [
+          "--profile", "black",
+          "--line-length", "88",
+          "--py", "39",
+          "--atomic",
+          "--trailing-comma",
+          "--multi-line", "3",
+          "--lines-after-imports", "2",
+          "--force-alphabetical-sort-within-sections"
+        ]
+
+  # 3. Code style verification (Flake8)
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.0
+    hooks:
+      - id: flake8
+        additional_dependencies:
+          - flake8-bugbear        # Catches common programming bugs
+          - flake8-comprehensions # Enforces clean list/dict comprehensions
+          - flake8-pyproject      # Allows loading options from pyproject.toml
+        args: [
+          "--max-line-length=88",
+          # Ignore rules that conflict with Black and embedded XML string literals.
+          "--extend-ignore=E124,E203,E501,W503"
+        ]
+
+  # 4. Static type enforcement (Mypy)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        additional_dependencies: [
+          types-requests,
+          types-python-dateutil
+        ]
+        args: [
+          "--ignore-missing-imports",
+          "--disallow-untyped-defs",
+          "--pretty"
+        ]
+
+  # 5. Core hygiene checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
