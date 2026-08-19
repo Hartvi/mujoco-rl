@@ -1,4 +1,4 @@
-/home/hartvi/venvs/ros2-torch/bin/python train_pincer_sb3.py \
+python train_pincer_sb3.py \
     --total-timesteps 1000000 \
     --n-envs 16 \
     --episode-max-steps 500 \

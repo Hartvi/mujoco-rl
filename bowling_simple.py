@@ -157,12 +157,12 @@ class BowlingSimple(gym.Env):
         candidates: list[int] = [
             body_id for body_id in self._pin_ids if body_id not in fallen_pin_ids
         ]
-        self._target_pin_id = min(
-            candidates,
-            key=lambda body_id: np.linalg.norm(
-                self._strike_point(body_id) - pincer_position
-            ),
-            default=None,
+
+        def distance_to_pincer(body_id: int) -> float:
+            return float(np.linalg.norm(self._strike_point(body_id) - pincer_position))
+
+        self._target_pin_id = (
+            min(candidates, key=distance_to_pincer) if candidates else None
         )
 
     def _relevant_pin_distance(self) -> float:
@@ -203,7 +203,9 @@ class BowlingSimple(gym.Env):
                 best_clearance = clearance
         return best_candidate
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
+    def reset(
+        self, *, seed: int | None = None, options: dict | None = None
+    ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
         mujoco.mj_resetData(self.bowling_scene, self.data)
         self.data.qpos[:] = self.bowling_scene.qpos0
@@ -332,7 +334,9 @@ class BowlingSimple(gym.Env):
             )
         }
 
-    def step(self, action: np.ndarray):
+    def step(
+        self, action: np.ndarray
+    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         action = np.asarray(action, dtype=np.float64)
         if not self.action_space.contains(action.astype(np.float32)):
             raise ValueError(f"Action outside space: {action}")

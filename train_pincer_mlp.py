@@ -8,9 +8,10 @@ import torch
 
 from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
+from torch_device import resolve_device
 
 
-def train(args):
+def train(args: argparse.Namespace) -> None:
     env = BowlingSimple(
         render_mode="human" if args.render else None, max_steps=args.episode_max_steps
     )
@@ -34,7 +35,7 @@ def train(args):
         ],
     )
     log_writer.writeheader()
-    device = torch.device(args.device)
+    device = resolve_device(args.device)
     model = PincerMLP(
         observation_dim=env.observation_space["observation.state"].shape[0],
         action_low=env.action_space.low,
@@ -43,9 +44,9 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     observation, _ = env.reset(seed=args.seed)
     total_steps = 0
-    rolling_rewards = deque(maxlen=50)
-    rolling_progress = deque(maxlen=50)
-    rolling_fallen = deque(maxlen=50)
+    rolling_rewards: deque[float] = deque(maxlen=50)
+    rolling_progress: deque[float] = deque(maxlen=50)
+    rolling_fallen: deque[int] = deque(maxlen=50)
     interval_rewards, interval_progress, interval_fallen = [], [], []
 
     for update in range(args.updates):
@@ -102,20 +103,20 @@ def train(args):
         states = torch.stack(states).to(device)
         raw_actions = torch.stack(raw_actions).to(device)
         old_log_probs = torch.stack(old_log_probs).to(device)
-        rewards = torch.as_tensor(rewards, dtype=torch.float32, device=device)
+        reward_tensor = torch.as_tensor(rewards, dtype=torch.float32, device=device)
         dones = torch.as_tensor(dones, dtype=torch.float32, device=device)
         values = torch.stack(values).to(device)
         with torch.no_grad():
             last = model.prepare_observation(observation).unsqueeze(0)
             next_value = model.value(last)[0]
 
-        advantages = torch.zeros_like(rewards)
+        advantages = torch.zeros_like(reward_tensor)
         gae = torch.zeros((), device=device)
         for t in reversed(range(args.horizon)):
             nonterminal = 1.0 - dones[t]
             next_v = next_value if t == args.horizon - 1 else values[t + 1]
             gae = (
-                rewards[t]
+                reward_tensor[t]
                 + args.gamma * nonterminal * next_v
                 - values[t]
                 + args.gamma * args.gae_lambda * nonterminal * gae
@@ -146,7 +147,7 @@ def train(args):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
 
-        mean_reward = float(rewards.mean().item())
+        mean_reward = float(reward_tensor.mean().item())
         mean_progress = float(sum(distance_rewards) / len(distance_rewards))
         newly_fallen_pins = int(sum(newly_fallen_counts))
         rolling_rewards.append(mean_reward)
@@ -199,7 +200,7 @@ def train(args):
     model.save(args.checkpoint)
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--updates", type=int, default=1000)
     p.add_argument("--horizon", type=int, default=512)
@@ -213,7 +214,11 @@ def main():
     p.add_argument("--value-coef", type=float, default=0.5)
     p.add_argument("--checkpoint", default="pincer_mlp.pt")
     p.add_argument("--entropy-coef", type=float, default=0.01)
-    p.add_argument("--device", default="cuda")
+    p.add_argument(
+        "--device",
+        default="auto",
+        help="auto (cuda, then mps, then cpu), or an explicit torch device",
+    )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--print-every", type=int, default=10)
     p.add_argument(

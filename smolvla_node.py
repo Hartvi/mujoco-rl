@@ -20,6 +20,9 @@ from typing import Any, Never
 import numpy as np
 import torch
 
+from torch_device import resolve_device
+
+
 # Prefer the checkout next to this script over an unrelated site-packages
 # installation. The LeRobot package imports many optional policies at package
 # import time, so keep those imports lazy until a model is actually requested.
@@ -33,17 +36,6 @@ STATE_KEY = "observation.state"
 ACTION_KEY = "action"
 STATE_DIM = 6
 ACTION_DIM = 6
-
-
-def _choose_device(device: str | None) -> torch.device:
-    if device is None or device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    result = torch.device(device)
-    if result.type == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested, but CUDA is not available")
-    if result.type == "mps" and not torch.backends.mps.is_available():
-        raise RuntimeError("MPS was requested, but MPS is not available")
-    return result
 
 
 def _validate_image(name: str, image: np.ndarray) -> np.ndarray:
@@ -76,7 +68,7 @@ class SmolVLAInference:
         from lerobot.policies import make_pre_post_processors
         from lerobot.policies.smolvla import SmolVLAPolicy
 
-        self.device: torch.device = _choose_device(device)
+        self.device: torch.device = resolve_device(device)
         self.policy_path: str = policy_path
         self.policy = SmolVLAPolicy.from_pretrained(policy_path)
         self.policy.to(self.device)
@@ -196,7 +188,11 @@ def main() -> None:
         "--state", required=True, nargs=STATE_DIM, type=float, metavar="S"
     )
     parser.add_argument("--task", required=True)
-    parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or mps")
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto (cuda, then mps, then cpu), or an explicit torch device",
+    )
     args: argparse.Namespace = parser.parse_args()
 
     model = SmolVLAInference(args.policy, args.device)

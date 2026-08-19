@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def _pin_xml(index: int, x: float, y: float) -> str:
-    return f'''
+    return f"""
     <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08">
       <freejoint name="pin_{index}_free"/>
       <geom name="pin_{index}_base" type="cylinder" size="0.055 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1" density="50"/>
@@ -12,7 +12,7 @@ def _pin_xml(index: int, x: float, y: float) -> str:
       <geom name="pin_{index}_neck" type="cylinder" size="0.025 0.055" pos="0 0 0.55" rgba="0.92 0.92 0.94 1" density="50"/>
       <geom name="pin_{index}_head" type="sphere" size="0.035" pos="0 0 0.64" rgba="0.92 0.92 0.94 1" density="50"/>
       <geom name="pin_{index}_stripe" type="cylinder" size="0.03 0.012" pos="0 0 0.555" rgba="0.82 0.05 0.04 1" contype="0" conaffinity="0" density="50"/>
-    </body>'''
+    </body>"""
 
 
 def _panda_xml() -> str:
@@ -47,10 +47,10 @@ def _panda_xml() -> str:
     # Construct the nested serial chain explicitly.
     chain: str = ""
     for i, (axis, color) in enumerate(zip(axes, colors), start=1):
-        chain += f'''
+        chain += f"""
         <body name="panda_link{i}" pos="0.19 0 0">
           <joint name="panda_joint{i}" type="hinge" axis="{axis}" range="-2.9 2.9" damping="2"/>
-          <geom name="panda_link{i}_geom" type="capsule" fromto="0 0 0 0.19 0 0" size="0.055" rgba="{color}" mass="0.35"/>'''
+          <geom name="panda_link{i}_geom" type="capsule" fromto="0 0 0 0.19 0 0" size="0.055" rgba="{color}" mass="0.35"/>"""
     chain += tail
     # The hand fragment closes link 7; close the remaining six links here.
     chain += "</body>" * 6

@@ -6,4 +6,3 @@
       --seed "$RANDOM" \
       --model runs/pincer_sb3/best/best_model.zip \
       --vecnormalize  runs/pincer_sb3/best/vecnormalize.pkl
-
