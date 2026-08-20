@@ -28,6 +28,7 @@ from stable_baselines3.common.vec_env import (
 
 from bowling_simple import BowlingSimple
 from pincer_controller import PincerController
+from torch_device import resolve_device_name
 
 
 REWARD_KEYS = (
@@ -129,7 +130,8 @@ def train(args: argparse.Namespace) -> None:
     if args.n_envs < 1:
         raise ValueError("--n-envs must be at least 1")
 
-    set_random_seed(args.seed, using_cuda=args.device.startswith("cuda"))
+    device = resolve_device_name(args.device)
+    set_random_seed(args.seed, using_cuda=device.startswith("cuda"))
     output_dir = Path(args.output_dir)
     checkpoint_dir = output_dir / "checkpoints"
     best_dir = output_dir / "best"
@@ -186,7 +188,7 @@ def train(args: argparse.Namespace) -> None:
     if tensorboard_log is not None:
         Path(tensorboard_log).mkdir(parents=True, exist_ok=True)
     if resume is not None:
-        model = PPO.load(str(resume), env=train_env, device=args.device)
+        model = PPO.load(str(resume), env=train_env, device=device)
     else:
         model = PPO(
             "MlpPolicy",
@@ -204,7 +206,7 @@ def train(args: argparse.Namespace) -> None:
             policy_kwargs=policy_kwargs,
             verbose=1,
             seed=args.seed,
-            device=args.device,
+            device=device,
             tensorboard_log=tensorboard_log,
         )
 
@@ -234,6 +236,7 @@ def train(args: argparse.Namespace) -> None:
     )
 
     config = vars(args).copy()
+    config["device"] = device
     config["action_semantics"] = [
         "vx",
         "vy",
@@ -292,7 +295,11 @@ def main() -> None:
     parser.add_argument("--clip", type=float, default=0.2)
     parser.add_argument("--entropy-coef", type=float, default=0.01)
     parser.add_argument("--value-coef", type=float, default=0.5)
-    parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto (cuda, then mps, then cpu), or an explicit torch device",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output-dir", default="runs/pincer_sb3")
     parser.add_argument(

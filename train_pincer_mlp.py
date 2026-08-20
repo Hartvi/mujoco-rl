@@ -10,6 +10,7 @@ from gymnasium import spaces
 
 from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
+from torch_device import resolve_device
 
 
 def train(args: argparse.Namespace) -> None:
@@ -40,7 +41,7 @@ def train(args: argparse.Namespace) -> None:
         ],
     )
     log_writer.writeheader()
-    device = torch.device(args.device)
+    device = resolve_device(args.device)
     model = PincerMLP(
         observation_dim=observation_dim,
         action_low=env.action_space.low,
@@ -222,7 +223,11 @@ def main() -> None:
     p.add_argument("--value-coef", type=float, default=0.5)
     p.add_argument("--checkpoint", default="pincer_mlp.pt")
     p.add_argument("--entropy-coef", type=float, default=0.01)
-    p.add_argument("--device", default="cuda")
+    p.add_argument(
+        "--device",
+        default="auto",
+        help="auto (cuda, then mps, then cpu), or an explicit torch device",
+    )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--print-every", type=int, default=10)
     p.add_argument(

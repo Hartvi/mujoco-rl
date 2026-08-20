@@ -16,6 +16,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from bowling_simple import BowlingSimple
+from torch_device import resolve_device_name
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ def load_sb3_policy(
     device: str,
     deterministic: bool,
 ) -> ActionFunction:
-    model = PPO.load(model_path, device=device)
+    model = PPO.load(model_path, device=resolve_device_name(device))
     probe = DummyVecEnv([lambda: gym.wrappers.FlattenObservation(BowlingSimple())])
     normalizer = VecNormalize.load(stats_path, probe)
     normalizer.training = False
@@ -158,7 +159,11 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--episode-max-steps", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto (cuda, then mps, then cpu), or an explicit torch device",
+    )
     parser.add_argument("--stochastic", action="store_true")
     parser.add_argument("--include-baselines", action="store_true")
     parser.add_argument("--render", action="store_true")

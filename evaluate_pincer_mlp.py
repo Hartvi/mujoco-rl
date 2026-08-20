@@ -14,6 +14,7 @@ from gymnasium import spaces
 
 from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
+from torch_device import resolve_device
 
 
 @dataclass(frozen=True)
@@ -159,7 +160,11 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--episode-max-steps", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto (cuda, then mps, then cpu), or an explicit torch device",
+    )
     parser.add_argument(
         "--stochastic",
         action="store_true",
@@ -188,7 +193,7 @@ def main() -> None:
     if args.episode_max_steps < 1:
         parser.error("--episode-max-steps must be at least 1")
 
-    device = torch.device(args.device)
+    device = resolve_device(args.device)
     policies = [
         (
             "checkpoint",
