@@ -61,11 +61,14 @@ class PincerMLP(nn.Module):
 
     @staticmethod
     def flatten_observation(
-        observation: dict[str, np.ndarray],
+        observation: Mapping[str, np.ndarray] | np.ndarray,
     ) -> np.ndarray[tuple[int], np.dtype[np.floating]]:
-        if isinstance(observation, Mapping):
-            observation = observation["observation.state"]
-        return np.asarray(observation, dtype=np.float32).reshape(-1)
+        state = (
+            observation["observation.state"]
+            if isinstance(observation, Mapping)
+            else observation
+        )
+        return np.asarray(state, dtype=np.float32).reshape(-1)
 
     @torch.no_grad()
     def prepare_observation(

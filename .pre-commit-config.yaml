@@ -31,11 +31,7 @@ repos:
           - flake8-bugbear        # Catches common programming bugs
           - flake8-comprehensions # Enforces clean list/dict comprehensions
           - flake8-pyproject      # Allows loading options from pyproject.toml
-        args: [
-          "--max-line-length=88",
-          # Ignore rules that conflict with Black and embedded XML string literals.
-          "--extend-ignore=E124,E203,E501,W503"
-        ]
+        # Config lives in [tool.flake8] in pyproject.toml.
 
   # 4. Static type enforcement (Mypy)
   - repo: https://github.com/pre-commit/mirrors-mypy
@@ -46,17 +42,38 @@ repos:
           types-requests,
           types-python-dateutil
         ]
-        args: [
-          "--ignore-missing-imports",
-          "--disallow-untyped-defs",
-          "--pretty"
-        ]
+        # Config lives in [tool.mypy] in pyproject.toml.
 
-  # 5. Core hygiene checks
+  # 5. Shell script linting (ShellCheck)
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  # 6. Core hygiene checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: check-yaml
+      - id: check-toml
       - id: end-of-file-fixer
       - id: trailing-whitespace
+      - id: mixed-line-ending
       - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: debug-statements
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  # 7. Project test suite
+  - repo: local
+    hooks:
+      - id: bowling-environment-tests
+        name: Run bowling environment unit tests
+        entry: python -m unittest -v test_bowling_environment.py
+        language: system
+        pass_filenames: false
+        always_run: true

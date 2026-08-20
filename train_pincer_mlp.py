@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import csv
 from collections import deque
+from typing import cast
 
 import torch
+from gymnasium import spaces
 
 from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
@@ -15,6 +17,9 @@ def train(args: argparse.Namespace) -> None:
         render_mode="human" if args.render else None,
         max_steps=args.episode_max_steps,
     )
+    observation_dim = cast(
+        spaces.Box, env.observation_space["observation.state"]
+    ).shape[0]
     log_file = open(args.log_file, "w", newline="")  # noqa: SIM115
     log_writer = csv.DictWriter(
         log_file,
@@ -37,7 +42,7 @@ def train(args: argparse.Namespace) -> None:
     log_writer.writeheader()
     device = torch.device(args.device)
     model = PincerMLP(
-        observation_dim=env.observation_space["observation.state"].shape[0],
+        observation_dim=observation_dim,
         action_low=env.action_space.low,
         action_high=env.action_space.high,
     ).to(device)
@@ -102,12 +107,12 @@ def train(args: argparse.Namespace) -> None:
             if terminated or truncated:
                 observation, _ = env.reset()
 
-        states = torch.stack(states).to(device)
-        raw_actions = torch.stack(raw_actions).to(device)
-        old_log_probs = torch.stack(old_log_probs).to(device)
+        states_t = torch.stack(states).to(device)
+        raw_actions_t = torch.stack(raw_actions).to(device)
+        old_log_probs_t = torch.stack(old_log_probs).to(device)
         rewards_tensor = torch.as_tensor(rewards, dtype=torch.float32, device=device)
-        dones = torch.as_tensor(dones, dtype=torch.float32, device=device)
-        values = torch.stack(values).to(device)
+        dones_t = torch.as_tensor(dones, dtype=torch.float32, device=device)
+        values_t = torch.stack(values).to(device)
         with torch.no_grad():
             last = model.prepare_observation(observation).unsqueeze(0)
             next_value = model.value(last)[0]
@@ -115,28 +120,28 @@ def train(args: argparse.Namespace) -> None:
         advantages = torch.zeros_like(rewards_tensor)
         gae = torch.zeros((), device=device)
         for t in reversed(range(args.horizon)):
-            nonterminal = 1.0 - dones[t]
-            next_v = next_value if t == args.horizon - 1 else values[t + 1]
+            nonterminal = 1.0 - dones_t[t]
+            next_v = next_value if t == args.horizon - 1 else values_t[t + 1]
             gae = (
                 rewards[t]
                 + args.gamma * nonterminal * next_v
-                - values[t]
+                - values_t[t]
                 + args.gamma * args.gae_lambda * nonterminal * gae
             )
             advantages[t] = gae
 
-        returns = advantages + values
+        returns = advantages + values_t
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         for _ in range(args.epochs):
             for indices in torch.randperm(args.horizon, device=device).split(
                 args.batch_size
             ):
                 _, log_prob, value, _ = model.action_and_value(
-                    states[indices], raw_actions[indices]
+                    states_t[indices], raw_actions_t[indices]
                 )
-                ratio = (log_prob - old_log_probs[indices]).exp()
+                ratio = (log_prob - old_log_probs_t[indices]).exp()
                 clipped = torch.clamp(ratio, 1 - args.clip, 1 + args.clip)
-                entropy = model.distribution(states[indices]).entropy().sum(-1).mean()
+                entropy = model.distribution(states_t[indices]).entropy().sum(-1).mean()
                 loss = (
                     -torch.min(
                         ratio * advantages[indices],

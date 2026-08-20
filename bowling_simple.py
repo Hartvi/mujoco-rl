@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar, SupportsFloat, TypeAlias
+from typing import Any, SupportsFloat, TypeAlias
 
 import gymnasium as gym
 import mujoco
@@ -19,7 +19,9 @@ ObsType: TypeAlias = dict[str, np.ndarray]
 
 
 class BowlingSimple(gym.Env):
-    metadata: ClassVar[dict[str, Any]] = {
+    action_space: spaces.Box
+    observation_space: spaces.Dict
+    metadata: dict[str, Any] = {
         "render_modes": ["human", "rgb_array"],
         "render_fps": 30,
     }

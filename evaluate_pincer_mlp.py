@@ -6,9 +6,11 @@ import argparse
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 import torch
+from gymnasium import spaces
 
 from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
@@ -116,8 +118,11 @@ def load_checkpoint_policy(
 ) -> ActionFunction:
     probe_env = BowlingSimple()
     try:
+        observation_dim = cast(
+            spaces.Box, probe_env.observation_space["observation.state"]
+        ).shape[0]
         model = PincerMLP(
-            observation_dim=probe_env.observation_space["observation.state"].shape[0],
+            observation_dim=observation_dim,
             action_low=probe_env.action_space.low,
             action_high=probe_env.action_space.high,
         ).to(device)
