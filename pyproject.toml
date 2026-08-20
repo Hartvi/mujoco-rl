@@ -1,0 +1,19 @@
+[tool.flake8]
+max-line-length = 88
+# Ignore rules that conflict with Black and embedded XML string literals.
+extend-ignore = ["E124", "E203", "E501", "W503"]
+
+[tool.mypy]
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+no_implicit_optional = true
+strict_equality = true
+pretty = true
+
+# Neither ships type stubs or a py.typed marker.
+[[tool.mypy.overrides]]
+module = ["mujoco.*", "lerobot.*"]
+ignore_missing_imports = true

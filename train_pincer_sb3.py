@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, cast
 
 import gymnasium as gym
 import numpy as np
@@ -19,7 +19,12 @@ from stable_baselines3.common.callbacks import (
 )
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    SubprocVecEnv,
+    VecEnv,
+    VecNormalize,
+)
 
 from bowling_simple import BowlingSimple
 from pincer_controller import PincerController
@@ -39,9 +44,9 @@ REWARD_KEYS = (
 
 def make_env(
     episode_max_steps: int, seed: int, monitor_path: Path | None
-) -> Callable[[], Monitor]:
-    def factory() -> Monitor:
-        env = gym.wrappers.FlattenObservation(
+) -> Callable[[], gym.Env[Any, Any]]:
+    def factory() -> gym.Env[Any, Any]:
+        env: gym.Env[Any, Any] = gym.wrappers.FlattenObservation(
             BowlingSimple(max_steps=episode_max_steps)
         )
         env = Monitor(
@@ -99,7 +104,8 @@ class SaveBestVecNormalizeCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.parent.eval_env.save(str(self.path))
+        eval_env = cast(EvalCallback, self.parent).eval_env
+        cast(VecNormalize, eval_env).save(str(self.path))
         return True
 
 
@@ -138,6 +144,7 @@ def train(args: argparse.Namespace) -> None:
         )
         for rank in range(args.n_envs)
     ]
+    train_base: VecEnv
     if args.n_envs == 1:
         train_base = DummyVecEnv(train_factories)
     else:

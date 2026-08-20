@@ -254,7 +254,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
                 + np.array([0.0, 0.0, env.STRIKE_POINT_HEIGHT])
                 - env.data.xpos[env._ee.body_id]
             )
-            self.assertAlmostEqual(env._relevant_pin_distance(), expected)
+            self.assertAlmostEqual(float(env._relevant_pin_distance()), float(expected))
         finally:
             env.close()
 
@@ -269,7 +269,7 @@ class BowlingEnvironmentTest(unittest.TestCase):
                 + np.array([0.0, 0.0, env.STRIKE_POINT_HEIGHT])
                 - env.data.xpos[env._ee.body_id]
             )
-            self.assertAlmostEqual(env._relevant_pin_distance(), expected)
+            self.assertAlmostEqual(float(env._relevant_pin_distance()), float(expected))
 
             env.data.qpos[env._ee.object_qpos_id] += 0.5
             mujoco.mj_forward(env.bowling_scene, env.data)

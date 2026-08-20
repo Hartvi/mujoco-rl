@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import cast
 
 import gymnasium as gym
 import numpy as np
@@ -45,7 +46,7 @@ def load_sb3_policy(
 
     def act(observation: dict[str, np.ndarray], _env: BowlingSimple) -> np.ndarray:
         flat = np.asarray(observation["observation.state"], dtype=np.float32)
-        normalized = normalizer.normalize_obs(flat[None, :])[0]
+        normalized = cast(np.ndarray, normalizer.normalize_obs(flat[None, :]))[0]
         action, _ = model.predict(normalized, deterministic=deterministic)
         return np.asarray(action, dtype=np.float32)
 
