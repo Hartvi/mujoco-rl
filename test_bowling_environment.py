@@ -134,7 +134,14 @@ class BowlingEnvironmentTest(unittest.TestCase):
                 1.0,
                 1.0,
             ]
-            env.data.qvel[pin_dof : pin_dof + 6] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+            env.data.qvel[pin_dof : pin_dof + 6] = [
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0,
+                6.0,
+            ]
             mujoco.mj_forward(env.bowling_scene, env.data)
             state = env._get_observation()["observation.state"]
             start = env.PINCER_STATE_SIZE
@@ -296,7 +303,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
         env = BowlingSimple(max_steps=5)
         try:
             env.reset()
-            env._relevant_pin_distance = lambda: env._previous_pin_distance  # type: ignore[method-assign]
+            env._relevant_pin_distance = (  # type: ignore[method-assign]
+                lambda: env._previous_pin_distance
+            )
             action = env.action_space.high.copy()
             _, _, _, _, info = env.step(action)
             self.assertAlmostEqual(
@@ -318,13 +327,17 @@ class BowlingEnvironmentTest(unittest.TestCase):
         env = BowlingSimple(max_steps=5)
         try:
             env.reset(seed=1)
-            env._relevant_pin_distance = lambda: env._previous_pin_distance  # type: ignore[method-assign]
+            env._relevant_pin_distance = (  # type: ignore[method-assign]
+                lambda: env._previous_pin_distance
+            )
             closing = np.zeros(7, dtype=np.float32)
             closing[6] = -1.0
             _, _, _, _, close_info = env.step(closing)
 
             env.reset(seed=1)
-            env._relevant_pin_distance = lambda: env._previous_pin_distance  # type: ignore[method-assign]
+            env._relevant_pin_distance = (  # type: ignore[method-assign]
+                lambda: env._previous_pin_distance
+            )
             opening = -closing
             _, _, _, _, open_info = env.step(opening)
 
@@ -337,7 +350,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
         env = BowlingSimple(max_steps=5)
         try:
             env.reset()
-            env._fallen_pin_ids = lambda: {env._pin_ids[0]}  # type: ignore[method-assign]
+            env._fallen_pin_ids = lambda: {  # type: ignore[method-assign]
+                env._pin_ids[0]
+            }
             _, _, _, _, info = env.step(np.zeros(7, dtype=np.float32))
             self.assertEqual(info["reward.fallen_pins"], env.NEWLY_FALLEN_REWARD)
         finally:
@@ -385,7 +400,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
         action = np.zeros(7, dtype=np.float32)
         try:
             env.reset()
-            env._fallen_pin_ids = lambda: set(env._pin_ids)  # type: ignore[method-assign]
+            env._fallen_pin_ids = lambda: set(  # type: ignore[method-assign]
+                env._pin_ids
+            )
             _, _, terminated, truncated, info = env.step(action)
             self.assertTrue(terminated)
             self.assertFalse(truncated)
@@ -426,17 +443,23 @@ class BowlingEnvironmentTest(unittest.TestCase):
             frozenset(
                 (
                     mujoco.mj_id2name(
-                        env.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom1)
+                        env.bowling_scene,
+                        mujoco.mjtObj.mjOBJ_GEOM,
+                        int(contact.geom1),
                     ),
                     mujoco.mj_id2name(
-                        env.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom2)
+                        env.bowling_scene,
+                        mujoco.mjtObj.mjOBJ_GEOM,
+                        int(contact.geom2),
                     ),
                 )
             )
             for contact in env.data.contact
         }
 
-    def test_ground_contact_blocks_downward_commands_and_changes_reward(self) -> None:
+    def test_ground_contact_blocks_downward_commands_and_changes_reward(
+        self,
+    ) -> None:
         env = BowlingSimple(max_steps=200)
         try:
             env.reset()
@@ -501,7 +524,9 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
-    def test_internal_collision_excluded_and_external_contacts_work(self) -> None:
+    def test_internal_collision_excluded_and_external_contacts_work(
+        self,
+    ) -> None:
         env = BowlingSimple()
         try:
             env.reset()

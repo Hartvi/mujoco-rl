@@ -21,11 +21,11 @@ class PincerMLP(nn.Module):
 
     def __init__(
         self,
-        observation_dim=148,
-        action_dim=7,
-        hidden_dim=256,
-        action_low=None,
-        action_high=None,
+        observation_dim: int = 148,
+        action_dim: int = 7,
+        hidden_dim: int = 256,
+        action_low: np.ndarray | None = None,
+        action_high: np.ndarray | None = None,
     ) -> None:
         super().__init__()
         self.actor = nn.Sequential(
@@ -69,7 +69,7 @@ class PincerMLP(nn.Module):
 
     @torch.no_grad()
     def prepare_observation(
-        self, observation: dict[str, np.ndarray], *, update=False
+        self, observation: dict[str, np.ndarray], *, update: bool = False
     ) -> torch.Tensor:
         state: torch.Tensor = torch.as_tensor(
             self.flatten_observation(observation),
@@ -91,11 +91,11 @@ class PincerMLP(nn.Module):
         )
         return torch.clamp(normalized, -10.0, 10.0)
 
-    def distribution(self, state) -> Normal:
+    def distribution(self, state: torch.Tensor) -> Normal:
         mean = self.actor(state)
         return Normal(mean, self.log_std.exp().expand_as(mean))
 
-    def value(self, state):
+    def value(self, state: torch.Tensor) -> torch.Tensor:
         return self.critic(state).squeeze(-1)
 
     def action_and_value(
@@ -112,7 +112,7 @@ class PincerMLP(nn.Module):
 
     @torch.no_grad()
     def act(
-        self, observation: dict[str, np.ndarray], deterministic=False
+        self, observation: dict[str, np.ndarray], deterministic: bool = False
     ) -> np.ndarray[tuple[Any, ...], np.dtype[np.floating]]:
         state: torch.Tensor = self.prepare_observation(observation).unsqueeze(0)
         dist: Normal = self.distribution(state)

@@ -10,7 +10,9 @@ from train_pincer_sb3 import train
 
 
 class StableBaselinesWorkflowTest(unittest.TestCase):
-    def test_short_training_saves_reloadable_model_and_normalization(self) -> None:
+    def test_short_training_saves_reloadable_model_and_normalization(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             args = argparse.Namespace(

@@ -15,7 +15,10 @@ class PandaController:
     )
 
     def __init__(
-        self, model: mujoco.MjModel, data: mujoco.MjData, control_dt: float = 0.02
+        self,
+        model: mujoco.MjModel,
+        data: mujoco.MjData,
+        control_dt: float = 0.02,
     ) -> None:
         self.model: mujoco.MjModel = model
         self.data: mujoco.MjData = data

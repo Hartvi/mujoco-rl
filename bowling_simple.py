@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar
+from typing import Any, ClassVar, SupportsFloat, TypeAlias
 
 import gymnasium as gym
 import mujoco
@@ -13,6 +13,9 @@ from gymnasium import spaces
 
 from bowling_scene import make_bowling_xml
 from pincer_controller import PincerController
+
+
+ObsType: TypeAlias = dict[str, np.ndarray]
 
 
 class BowlingSimple(gym.Env):
@@ -149,8 +152,11 @@ class BowlingSimple(gym.Env):
             if float(self.data.xmat[body_id].reshape(3, 3)[2, 2]) < 0.75
         }
 
-    def _strike_point(self, body_id: int) -> np.ndarray:
-        return self.data.xpos[body_id] + np.array([0.0, 0.0, self.STRIKE_POINT_HEIGHT])
+    def _strike_point(self, body_id: int | None) -> np.ndarray:
+        offset = np.array([0.0, 0.0, self.STRIKE_POINT_HEIGHT])
+        if body_id is None:
+            return offset
+        return self.data.xpos[body_id] + offset
 
     def _select_target_pin(self, fallen_pin_ids: set[int]) -> None:
         pincer_position = self.data.xpos[self._ee.body_id]
@@ -203,7 +209,9 @@ class BowlingSimple(gym.Env):
                 best_clearance = clearance
         return best_candidate
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
+    def reset(
+        self, *, seed: int | None = None, options: dict | None = None
+    ) -> tuple[ObsType, dict[str, Any]]:
         super().reset(seed=seed)
         mujoco.mj_resetData(self.bowling_scene, self.data)
         self.data.qpos[:] = self.bowling_scene.qpos0
@@ -302,7 +310,7 @@ class BowlingSimple(gym.Env):
             )
         )
 
-    def _get_observation(self) -> dict[str, np.ndarray]:
+    def _get_observation(self) -> ObsType:
         pincer_state: np.ndarray[tuple[Any, ...], np.dtype[Any]] = np.concatenate(
             (
                 self._ee.observation(),
@@ -332,7 +340,9 @@ class BowlingSimple(gym.Env):
             )
         }
 
-    def step(self, action: np.ndarray):
+    def step(
+        self, action: np.ndarray
+    ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         action = np.asarray(action, dtype=np.float64)
         if not self.action_space.contains(action.astype(np.float32)):
             raise ValueError(f"Action outside space: {action}")

@@ -1,5 +1,10 @@
 # Pincer Bowling RL TODO
 
+### 0. Developer
+- [ ] fix pre-commit & enforce proper formatting
+- [ ] add auto-generate stubs script
+- [ ] add requirements.txt
+
 ## 1. Validate the environment
 
 - [x] Run both Gymnasium and Stable-Baselines3 `check_env` checks.

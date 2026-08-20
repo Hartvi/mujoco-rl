@@ -20,6 +20,7 @@ from typing import Any, Never
 import numpy as np
 import torch
 
+
 # Prefer the checkout next to this script over an unrelated site-packages
 # installation. The LeRobot package imports many optional policies at package
 # import time, so keep those imports lazy until a model is actually requested.
@@ -158,7 +159,7 @@ class SmolVLAInference:
         # factory fallback; make the final device placement explicit for every
         # tensor, including tokenized language inputs.
         processed = {
-            key: value.to(self.device) if isinstance(value, torch.Tensor) else value
+            key: (value.to(self.device) if isinstance(value, torch.Tensor) else value)
             for key, value in processed.items()
         }
         action = self.postprocess(self.policy.select_action(processed))
@@ -188,7 +189,9 @@ def main() -> None:
         description="Run one standalone SmolVLA inference step"
     )
     parser.add_argument(
-        "--policy", required=True, help="Checkpoint path or Hugging Face model ID"
+        "--policy",
+        required=True,
+        help="Checkpoint path or Hugging Face model ID",
     )
     parser.add_argument("--laptop-image", required=True)
     parser.add_argument("--phone-image", required=True)

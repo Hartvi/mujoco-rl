@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar
+from typing import Any, ClassVar, SupportsFloat, TypeAlias
 
 import gymnasium as gym
 import mujoco
@@ -13,6 +13,9 @@ from gymnasium import spaces
 
 from bowling_scene import make_bowling_xml
 from panda_controller import PandaController
+
+
+ObsType: TypeAlias = dict[str, np.ndarray]
 
 
 class BowlingEnv(gym.Env):
@@ -64,7 +67,9 @@ class BowlingEnv(gym.Env):
                 fallen += 1
         return fallen
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
+    def reset(
+        self, *, seed: int | None = None, options: dict | None = None
+    ) -> tuple[ObsType, dict[str, Any]]:
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
         self.data.qpos[:] = self.model.qpos0
@@ -74,14 +79,16 @@ class BowlingEnv(gym.Env):
         self._step_count = 0
         return self._get_observation(), {"fallen_pins": 0, "task": self.task}
 
-    def _get_observation(self) -> dict[str, np.ndarray]:
+    def _get_observation(self) -> ObsType:
         return {
             "observation.state": self._ee.observation(),
             "observation.images.laptop": self._render_camera("laptop_camera"),
             "observation.images.phone": self._render_camera("phone_camera"),
         }
 
-    def step(self, action: np.ndarray):
+    def step(
+        self, action: np.ndarray
+    ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         action = np.asarray(action, dtype=np.float64)
         if not self.action_space.contains(action.astype(np.float32)):
             raise ValueError(f"Action outside space: {action}")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def _pin_xml(index: int, x: float, y: float) -> str:
-    return f'''
+    return f"""
     <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08">
       <freejoint name="pin_{index}_free"/>
       <geom name="pin_{index}_base" type="cylinder" size="0.055 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1" density="50"/>
@@ -12,7 +12,7 @@ def _pin_xml(index: int, x: float, y: float) -> str:
       <geom name="pin_{index}_neck" type="cylinder" size="0.025 0.055" pos="0 0 0.55" rgba="0.92 0.92 0.94 1" density="50"/>
       <geom name="pin_{index}_head" type="sphere" size="0.035" pos="0 0 0.64" rgba="0.92 0.92 0.94 1" density="50"/>
       <geom name="pin_{index}_stripe" type="cylinder" size="0.03 0.012" pos="0 0 0.555" rgba="0.82 0.05 0.04 1" contype="0" conaffinity="0" density="50"/>
-    </body>'''
+    </body>"""
 
 
 def _panda_xml() -> str:
@@ -30,7 +30,15 @@ def _panda_xml() -> str:
         "0.85 0.85 0.88 1",
         "0.15 0.15 0.18 1",
     ]
-    axes: list[str] = ["0 0 1", "0 1 0", "0 1 0", "0 0 1", "0 1 0", "0 0 1", "0 1 0"]
+    axes: list[str] = [
+        "0 0 1",
+        "0 1 0",
+        "0 1 0",
+        "0 0 1",
+        "0 1 0",
+        "0 0 1",
+        "0 1 0",
+    ]
     # A compact serial arm along +x. The IK controller operates on its site.
     tail = """
           <site name="panda_hand" pos="0.12 0 0" size="0.035" rgba="0.1 0.8 0.1 1"/>
@@ -47,10 +55,10 @@ def _panda_xml() -> str:
     # Construct the nested serial chain explicitly.
     chain: str = ""
     for i, (axis, color) in enumerate(zip(axes, colors), start=1):
-        chain += f'''
+        chain += f"""
         <body name="panda_link{i}" pos="0.19 0 0">
           <joint name="panda_joint{i}" type="hinge" axis="{axis}" range="-2.9 2.9" damping="2"/>
-          <geom name="panda_link{i}_geom" type="capsule" fromto="0 0 0 0.19 0 0" size="0.055" rgba="{color}" mass="0.35"/>'''
+          <geom name="panda_link{i}_geom" type="capsule" fromto="0 0 0 0.19 0 0" size="0.055" rgba="{color}" mass="0.35"/>"""
     chain += tail
     # The hand fragment closes link 7; close the remaining six links here.
     chain += "</body>" * 6
@@ -118,6 +126,19 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
   {pincer_constraints}
 
   <actuator>
-    {(("".join(f'<position name="panda_motor{i}" joint="panda_joint{i}" kp="150" kv="20" ctrlrange="-2.9 2.9"/>' for i in range(1, 8)) + '<position name="panda_finger_motor1" joint="panda_finger_joint1" kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>') if not include_pincer else '<position name="distance_command" joint="cube_distance" kp="100" ctrllimited="true" ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>')}
+    {
+        (
+            ("".join(
+                f'<position name="panda_motor{i}" joint="panda_joint{i}" '
+                'kp="150" kv="20" ctrlrange="-2.9 2.9"/>'
+                for i in range(1, 8))
+                + '<position name="panda_finger_motor1" joint="panda_finger_joint1" '
+                'kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" '
+                'joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>'
+            ) if not include_pincer else '<position name="distance_command" '
+            'joint="cube_distance" kp="100" ctrllimited="true" '
+            'ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>'
+        )
+    }
   </actuator>
 </mujoco>"""

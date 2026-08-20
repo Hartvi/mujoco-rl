@@ -25,7 +25,10 @@ class PincerController:
     OBJECT_BODY = "cube_pair"
 
     def __init__(
-        self, model: mujoco.MjModel, data: mujoco.MjData, control_dt: float = 0.02
+        self,
+        model: mujoco.MjModel,
+        data: mujoco.MjData,
+        control_dt: float = 0.02,
     ) -> None:
         self.model: mujoco.MjModel = model
         self.data: mujoco.MjData = data
@@ -106,7 +109,11 @@ class PincerController:
         self.target_quat = self._quat_mul(
             self.target_quat,
             self._rotvec_to_quat(
-                np.clip(action[3:6], -self.max_rotation_delta, self.max_rotation_delta)
+                np.clip(
+                    action[3:6],
+                    -self.max_rotation_delta,
+                    self.max_rotation_delta,
+                )
             ),
         )
         self._apply_pose_control()

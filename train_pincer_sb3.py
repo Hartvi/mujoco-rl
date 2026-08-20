@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Callable
 
 import gymnasium as gym
 import numpy as np
@@ -23,6 +24,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNorm
 from bowling_simple import BowlingSimple
 from pincer_controller import PincerController
 
+
 REWARD_KEYS = (
     "reward.distance",
     "reward.rotation",
@@ -35,8 +37,10 @@ REWARD_KEYS = (
 )
 
 
-def make_env(episode_max_steps: int, seed: int, monitor_path: Path | None):
-    def factory():
+def make_env(
+    episode_max_steps: int, seed: int, monitor_path: Path | None
+) -> Callable[[], Monitor]:
+    def factory() -> Monitor:
         env = gym.wrappers.FlattenObservation(
             BowlingSimple(max_steps=episode_max_steps)
         )
@@ -155,7 +159,9 @@ def train(args: argparse.Namespace) -> None:
     eval_base = DummyVecEnv(
         [
             make_env(
-                args.episode_max_steps, args.seed + 10_000, output_dir / "eval_monitor"
+                args.episode_max_steps,
+                args.seed + 10_000,
+                output_dir / "eval_monitor",
             )
         ]
     )
@@ -221,7 +227,15 @@ def train(args: argparse.Namespace) -> None:
     )
 
     config = vars(args).copy()
-    config["action_semantics"] = ["vx", "vy", "vz", "wx", "wy", "wz", "jaw_velocity"]
+    config["action_semantics"] = [
+        "vx",
+        "vy",
+        "vz",
+        "wx",
+        "wy",
+        "wz",
+        "jaw_velocity",
+    ]
     config["physical_rate_limits"] = {
         "translation_m_per_s": PincerController.MAX_LINEAR_SPEED,
         "rotation_rad_per_s": PincerController.MAX_ANGULAR_SPEED,
@@ -277,7 +291,8 @@ def main() -> None:
     parser.add_argument(
         "--tensorboard-log",
         default="auto",
-        help="TensorBoard directory; 'auto' uses OUTPUT_DIR/tensorboard, empty disables it",
+        help="TensorBoard directory; 'auto' uses OUTPUT_DIR/tensorboard, "
+        "empty disables it",
     )
     parser.add_argument("--resume", default="", help="SB3 model zip to resume")
     parser.add_argument(

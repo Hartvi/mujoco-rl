@@ -10,9 +10,10 @@ from bowling_simple import BowlingSimple
 from pincer_mlp import PincerMLP
 
 
-def train(args):
+def train(args: argparse.Namespace) -> None:
     env = BowlingSimple(
-        render_mode="human" if args.render else None, max_steps=args.episode_max_steps
+        render_mode="human" if args.render else None,
+        max_steps=args.episode_max_steps,
     )
     log_file = open(args.log_file, "w", newline="")  # noqa: SIM115
     log_writer = csv.DictWriter(
@@ -43,10 +44,12 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     observation, _ = env.reset(seed=args.seed)
     total_steps = 0
-    rolling_rewards = deque(maxlen=50)
-    rolling_progress = deque(maxlen=50)
-    rolling_fallen = deque(maxlen=50)
-    interval_rewards, interval_progress, interval_fallen = [], [], []
+    rolling_rewards: deque[float] = deque(maxlen=50)
+    rolling_progress: deque[float] = deque(maxlen=50)
+    rolling_fallen: deque[int] = deque(maxlen=50)
+    interval_rewards: list[float] = []
+    interval_progress: list[float] = []
+    interval_fallen: list[int] = []
 
     for update in range(args.updates):
         states, raw_actions, old_log_probs, rewards, dones, values = (
@@ -102,14 +105,14 @@ def train(args):
         states = torch.stack(states).to(device)
         raw_actions = torch.stack(raw_actions).to(device)
         old_log_probs = torch.stack(old_log_probs).to(device)
-        rewards = torch.as_tensor(rewards, dtype=torch.float32, device=device)
+        rewards_tensor = torch.as_tensor(rewards, dtype=torch.float32, device=device)
         dones = torch.as_tensor(dones, dtype=torch.float32, device=device)
         values = torch.stack(values).to(device)
         with torch.no_grad():
             last = model.prepare_observation(observation).unsqueeze(0)
             next_value = model.value(last)[0]
 
-        advantages = torch.zeros_like(rewards)
+        advantages = torch.zeros_like(rewards_tensor)
         gae = torch.zeros((), device=device)
         for t in reversed(range(args.horizon)):
             nonterminal = 1.0 - dones[t]
@@ -136,7 +139,8 @@ def train(args):
                 entropy = model.distribution(states[indices]).entropy().sum(-1).mean()
                 loss = (
                     -torch.min(
-                        ratio * advantages[indices], clipped * advantages[indices]
+                        ratio * advantages[indices],
+                        clipped * advantages[indices],
                     ).mean()
                     + args.value_coef * 0.5 * (returns[indices] - value).square().mean()
                     - args.entropy_coef * entropy
@@ -146,7 +150,7 @@ def train(args):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
 
-        mean_reward = float(rewards.mean().item())
+        mean_reward = float(rewards_tensor.mean().item())
         mean_progress = float(sum(distance_rewards) / len(distance_rewards))
         newly_fallen_pins = int(sum(newly_fallen_counts))
         rolling_rewards.append(mean_reward)
@@ -199,7 +203,7 @@ def train(args):
     model.save(args.checkpoint)
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--updates", type=int, default=1000)
     p.add_argument("--horizon", type=int, default=512)
@@ -217,7 +221,9 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--print-every", type=int, default=10)
     p.add_argument(
-        "--render", action="store_true", help="show the MuJoCo viewer during training"
+        "--render",
+        action="store_true",
+        help="show the MuJoCo viewer during training",
     )
     p.add_argument(
         "--log-actions",
@@ -231,7 +237,9 @@ def main():
         help="simulator steps between optional action logs",
     )
     p.add_argument(
-        "--log-file", default="training_rewards.csv", help="CSV file for reward metrics"
+        "--log-file",
+        default="training_rewards.csv",
+        help="CSV file for reward metrics",
     )
     train(p.parse_args())
 
