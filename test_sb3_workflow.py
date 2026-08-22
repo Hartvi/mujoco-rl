@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import argparse
 import tempfile
 import unittest
 from pathlib import Path
 
 from evaluate_pincer_sb3 import load_sb3_policy
-from train_pincer_sb3 import train
+from train_pincer_sb3 import StrictArgs, train
 
 
 class StableBaselinesWorkflowTest(unittest.TestCase):
@@ -15,7 +14,7 @@ class StableBaselinesWorkflowTest(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            args = argparse.Namespace(
+            args = StrictArgs(
                 total_timesteps=16,
                 n_steps=16,
                 n_envs=1,
@@ -40,6 +39,7 @@ class StableBaselinesWorkflowTest(unittest.TestCase):
                 eval_episodes=1,
                 log_interval=1,
                 progress_bar=False,
+                pin_component=None,
             )
 
             train(args)

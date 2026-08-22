@@ -11,7 +11,7 @@ import mujoco.viewer
 import numpy as np
 from gymnasium import spaces
 
-from bowling_scene import make_bowling_xml
+from bowling_scene import make_bowling_xml, PinComponent
 from pincer_controller import PincerController
 
 
@@ -47,21 +47,19 @@ class BowlingSimple(gym.Env):
         render_mode: str | None = None,
         max_steps: int = 500,
         num_pins: int = 10,
-        part: str | None = None,
+        pin_component: PinComponent | None = None,
     ) -> None:
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
         if not 1 <= num_pins <= self.MAX_PINS:
             raise ValueError(f"num_pins must be between 1 and {self.MAX_PINS}")
-        if part not in ["body", "head", None]:
-            raise ValueError("part must be 'body', 'head', or None")
         self.render_mode = render_mode
         self.max_steps: int = max_steps
         self.num_pins: int = num_pins
         self.bowling_scene: mujoco.MjModel = mujoco.MjModel.from_xml_string(
             make_bowling_xml(include_pincer=True)
         )
-        self.part: str | None = part
+        self.part: PinComponent | None = pin_component
         self.data = mujoco.MjData(self.bowling_scene)
         self._viewer: Any = None
         self._renderer: mujoco.Renderer | None = None
@@ -86,13 +84,10 @@ class BowlingSimple(gym.Env):
             mujoco.mj_name2id(self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, name)
             for name in ("cube_1", "cube_2")
         ]
-        self._pin_head_ids: list[int] = [
-            mujoco.mj_name2id(
-                self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, f"pin_{i}_head"
-            )
-            for i in range(1, num_pins + 1)
-        ]
-        self.pin2headid: dict[int, int] = dict(zip(self._pin_ids, self._pin_head_ids))
+
+        self._pin_component_ids: dict[PinComponent, list[int]] = (
+            self.get_pin_component_ids()
+        )
         # Policy action layout: [vx, vy, vz, wx, wy, wz, jaw_velocity].
         # Each component is normalized to [-1, 1] and converted to a pose
         # delta using the controller's physical rate limits and control_dt.
@@ -113,6 +108,23 @@ class BowlingSimple(gym.Env):
                 ),
             }
         )
+
+    def get_pin_component_ids(self) -> dict[PinComponent, list[int]]:
+        _pin_component_ids: dict[PinComponent, list[int]] = {}
+        for pc in PinComponent.__members__.values():
+            _pin_component_ids[pc] = [
+                mujoco.mj_name2id(
+                    self.bowling_scene,
+                    mujoco.mjtObj.mjOBJ_GEOM,
+                    f"pin_{i}_{pc}",
+                )
+                for i in range(1, self.num_pins + 1)
+            ]
+        self.pin2component_id: dict[PinComponent, dict[int, int]] = {
+            p: dict(zip(self._pin_ids, _pin_component_ids[p]))
+            for p in PinComponent.__members__.values()
+        }
+        return _pin_component_ids
 
     def _fallen_pins(self) -> int:
         return len(self._fallen_pin_ids())
@@ -183,14 +195,15 @@ class BowlingSimple(gym.Env):
                     - self.data.xpos[self._ee.body_id]
                 )
             )
-        elif self.part == "head":
+        else:
             return float(
                 np.linalg.norm(
-                    self.data.xpos[self.pin2headid[self._target_pin_id]]
+                    self.data.geom_xpos[
+                        self.pin2component_id[self.part][self._target_pin_id]
+                    ]
                     - self.data.xpos[self._ee.body_id]
                 )
             )
-        raise ValueError(f"Unknown part: {self.part}")
 
     def _random_pincer_start_xy(self) -> np.ndarray:
         pin_positions: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = np.asarray(
@@ -432,6 +445,8 @@ class BowlingSimple(gym.Env):
                 "reward.time": time_reward,
                 "distance.relevant_pin": pin_distance,
                 "distance.ground_clearance": ground_clearance,
+                "pin.part": self.part.name if self.part is not None else None,
+                "pin.target_id": self._target_pin_id,
             },
         )
 

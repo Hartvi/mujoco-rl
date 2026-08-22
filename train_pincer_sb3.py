@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, cast, Sequence
 
 import gymnasium as gym
 import numpy as np
@@ -26,6 +26,7 @@ from stable_baselines3.common.vec_env import (
     VecNormalize,
 )
 
+from bowling_scene import PinComponent
 from bowling_simple import BowlingSimple
 from pincer_controller import PincerController
 from torch_device import resolve_device_name
@@ -40,15 +41,57 @@ REWARD_KEYS = (
     "reward.action",
     "reward.pin_touch",
     "reward.success",
+    "reward.time",
 )
 
 
+class StrictParser(argparse.ArgumentParser):
+    """Strict bowling parser that encodes correctness of arguments using types."""
+
+    def parse_args(self, args: Sequence[str] | None = None) -> StrictArgs:  # type: ignore
+        return cast(StrictArgs, super().parse_args(args))
+
+
+class StrictArgs(argparse.Namespace):
+    """Strict bowling namespace that encodes
+    correctness of namespace arguments using types."""
+
+    batch_size: int
+    total_timesteps: int
+    n_steps: int
+    n_envs: int
+    start_method: str
+    epochs: int
+    episode_max_steps: int
+    learning_rate: float
+    gamma: float
+    gae_lambda: float
+    clip: float
+    entropy_coef: float
+    value_coef: float
+    device: str
+    seed: int
+    output_dir: str
+    tensorboard_log: str
+    resume: str
+    vecnormalize: str
+    checkpoint_freq: int
+    eval_freq: int
+    eval_episodes: int
+    log_interval: int
+    progress_bar: bool
+    pin_component: PinComponent | None
+
+
 def make_env(
-    episode_max_steps: int, seed: int, monitor_path: Path | None
+    episode_max_steps: int,
+    seed: int,
+    monitor_path: Path | None,
+    pin_component: PinComponent | None,
 ) -> Callable[[], gym.Env[Any, Any]]:
     def factory() -> gym.Env[Any, Any]:
         env: gym.Env[Any, Any] = gym.wrappers.FlattenObservation(
-            BowlingSimple(max_steps=episode_max_steps)
+            BowlingSimple(max_steps=episode_max_steps, pin_component=pin_component)
         )
         env = Monitor(
             env,
@@ -120,7 +163,7 @@ def _resolve_resume_stats(resume: Path, explicit: str) -> Path | None:
     return next((path for path in candidates if path.exists()), None)
 
 
-def train(args: argparse.Namespace) -> None:
+def train(args: StrictArgs) -> None:
     rollout_size = args.n_steps * args.n_envs
     if rollout_size % args.batch_size != 0:
         raise ValueError(
@@ -143,6 +186,7 @@ def train(args: argparse.Namespace) -> None:
             args.episode_max_steps,
             args.seed + rank,
             output_dir / f"train_monitor_{rank}",
+            args.pin_component,
         )
         for rank in range(args.n_envs)
     ]
@@ -171,6 +215,7 @@ def train(args: argparse.Namespace) -> None:
                 args.episode_max_steps,
                 args.seed + 10_000,
                 output_dir / "eval_monitor",
+                args.pin_component,
             )
         ]
     )
@@ -271,7 +316,7 @@ def train(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = StrictParser()
     parser.add_argument("--total-timesteps", type=int, default=1_000_000)
     parser.add_argument("--n-steps", type=int, default=512)
     parser.add_argument(
@@ -319,6 +364,9 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--log-interval", type=int, default=1)
     parser.add_argument("--progress-bar", action="store_true")
+    parser.add_argument(
+        "--pin-component", type=PinComponent, default=None, choices=list(PinComponent)
+    )
     train(parser.parse_args())
 
 

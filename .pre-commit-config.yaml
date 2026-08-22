@@ -6,11 +6,20 @@ repos:
       - id: black
         args: ["--line-length=88"]
 
-  # 2. Sorted imports (isort)
+  # 2. Remove unused imports before sorting the remaining imports
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        name: autoflake (remove unused imports)
+        args: ["--in-place", "--remove-all-unused-imports"]
+
+  # 3. Sort imports in place (isort auto-fixes by default)
   - repo: https://github.com/PyCQA/isort
     rev: 5.13.2
     hooks:
       - id: isort
+        name: isort (sort imports)
         args: [
           "--profile", "black",
           "--line-length", "88",
@@ -22,7 +31,7 @@ repos:
           "--force-alphabetical-sort-within-sections"
         ]
 
-  # 3. Code style verification (Flake8)
+  # 4. Code style verification (Flake8)
   - repo: https://github.com/pycqa/flake8
     rev: 7.1.0
     hooks:
@@ -33,7 +42,7 @@ repos:
           - flake8-pyproject      # Allows loading options from pyproject.toml
         # Config lives in [tool.flake8] in pyproject.toml.
 
-  # 4. Static type enforcement (Mypy)
+  # 5. Static type enforcement (Mypy)
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.11.2
     hooks:
@@ -44,13 +53,13 @@ repos:
         ]
         # Config lives in [tool.mypy] in pyproject.toml.
 
-  # 5. Shell script linting (ShellCheck)
+  # 6. Shell script linting (ShellCheck)
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
 
-  # 6. Core hygiene checks
+  # 7. Core hygiene checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -68,7 +77,7 @@ repos:
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
 
-  # 7. Project test suite
+  # 8. Project test suite
   - repo: local
     hooks:
       - id: bowling-environment-tests

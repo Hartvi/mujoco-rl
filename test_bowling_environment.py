@@ -16,7 +16,11 @@ from bowling_simple import BowlingSimple
 class BowlingEnvironmentTest(unittest.TestCase):
     def test_bowling_scene_object_queries(self) -> None:
         env = BowlingSimple()
-        ids = env._pin_ids + env._cube_geom_ids + env._pin_head_ids
+        ids = (
+            env._pin_ids
+            + env._cube_geom_ids
+            + sum(env._pin_component_ids.values(), start=[])
+        )
 
         for id in ids:
             assert id >= 0, f"Id: {id}"

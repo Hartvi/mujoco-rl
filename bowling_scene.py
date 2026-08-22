@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+from enum import auto, StrEnum
+
+
+class PinComponent(StrEnum):
+    BASE = auto()
+    BODY = auto()
+    NECK = auto()
+    HEAD = auto()
+    STRIPE = auto()
+
 
 def _pin_xml(index: int, x: float, y: float) -> str:
     return f"""
     <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08">
       <freejoint name="pin_{index}_free"/>
-      <geom name="pin_{index}_base" type="cylinder" size="0.055 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1" density="50"/>
-      <geom name="pin_{index}_body" type="capsule" size="0.05 0.20" pos="0 0 0.32" rgba="0.92 0.92 0.94 1" density="50"/>
-      <geom name="pin_{index}_neck" type="cylinder" size="0.025 0.055" pos="0 0 0.55" rgba="0.92 0.92 0.94 1" density="50"/>
-      <geom name="pin_{index}_head" type="sphere" size="0.035" pos="0 0 0.64" rgba="0.92 0.92 0.94 1" density="50"/>
-      <geom name="pin_{index}_stripe" type="cylinder" size="0.03 0.012" pos="0 0 0.555" rgba="0.82 0.05 0.04 1" contype="0" conaffinity="0" density="50"/>
+      <geom name="pin_{index}_{PinComponent.BASE}" type="cylinder" size="0.055 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_{PinComponent.BODY}" type="capsule" size="0.05 0.20" pos="0 0 0.32" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_{PinComponent.NECK}" type="cylinder" size="0.025 0.055" pos="0 0 0.55" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_{PinComponent.HEAD}" type="sphere" size="0.035" pos="0 0 0.64" rgba="0.92 0.92 0.94 1" density="50"/>
+      <geom name="pin_{index}_{PinComponent.STRIPE}" type="cylinder" size="0.03 0.012" pos="0 0 0.555" rgba="0.82 0.05 0.04 1" contype="0" conaffinity="0" density="50"/>
     </body>"""
 
 
