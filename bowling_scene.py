@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import auto, StrEnum
+from random import random, uniform
 
 
 class PinComponent(StrEnum):
@@ -13,9 +14,10 @@ class PinComponent(StrEnum):
     STRIPE = auto()
 
 
-def _pin_xml(index: int, x: float, y: float) -> str:
+def _pin_xml(index: int, x: float, y: float, fallen_over: bool = False) -> str:
+    fallen = int(fallen_over)
     return f"""
-    <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08">
+    <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08" euler="{uniform(0.4, 1) * fallen} {uniform(0.4, 1) * fallen} {random() * fallen}">
       <freejoint name="pin_{index}_free"/>
       <geom name="pin_{index}_{PinComponent.BASE}" type="cylinder" size="0.055 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1" density="50"/>
       <geom name="pin_{index}_{PinComponent.BODY}" type="capsule" size="0.05 0.20" pos="0 0 0.32" rgba="0.92 0.92 0.94 1" density="50"/>
@@ -95,14 +97,16 @@ def _pincer_xml() -> str:
     """
 
 
-def make_bowling_xml(include_pincer: bool = False) -> str:
+def make_bowling_xml(include_pincer: bool = False, pins_fallen: bool = False) -> str:
     positions = []
     spacing = 0.27
     for row in range(4):
         x: float = 1.25 + row * spacing * 0.86
         for column in range(row + 1):
             positions.append((x, (column - row / 2.0) * spacing))
-    pins: str = "\n".join(_pin_xml(i + 1, x, y) for i, (x, y) in enumerate(positions))
+    pins: str = "\n".join(
+        _pin_xml(i + 1, x, y, pins_fallen) for i, (x, y) in enumerate(positions)
+    )
     pincer_constraints: str = (
         """
   <contact>

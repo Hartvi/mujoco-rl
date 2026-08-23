@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from typing import Any, SupportsFloat, TypeAlias
 
-import gymnasium
 import gymnasium as gym
 import mujoco
 import mujoco.viewer
@@ -19,7 +18,7 @@ from pincer_controller import PincerController
 ObsType: TypeAlias = dict[str, np.ndarray]
 
 
-class BowlingSimple(gym.Env):
+class BowlingPickUp(gym.Env):
     action_space: spaces.Box
     observation_space: spaces.Dict
     metadata: dict[str, Any] = {
@@ -30,17 +29,20 @@ class BowlingSimple(gym.Env):
     PINCER_STATE_SIZE = 8
     PIN_STATE_SIZE = 14
     MAX_PINS = 10
-    NEWLY_FALLEN_REWARD = 10.0
-    PIN_TOUCH_REWARD = 0.0
-    SUCCESS_REWARD = 25.0
+    SUCCESS_REWARD = 0.0
     START_RADIUS = 0.5
     START_PIN_CLEARANCE = 0.15
     STRIKE_POINT_HEIGHT = 0.25
-    MIN_GROUND_CLEARANCE = 0.00
-    GROUND_PENALTY_SCALE = 3.0
-    DISTANCE_SCALE = 5.0
-    AWAY_DISTANCE_MULTIPLIER = 1.0
-    ACTION_PENALTY_SCALE = 0.002
+    # reward modifier
+    AWAY_DISTANCE_MULTIPLIER = 0.0
+    # rewards
+    MIN_GROUND_CLEARANCE = 0.01
+    NEWLY_STOOD_UP_REWARD = 0.0
+    PIN_TOUCH_REWARD = 0.0
+    GROUND_PENALTY_SCALE = 0.1
+    DISTANCE_SCALE = 0.0
+    ACTION_PENALTY_SCALE = 0.0
+    BETWEEN_PIN_SCALE = 0.1
     TIME_PENALTY = 0.002
 
     def __init__(
@@ -48,7 +50,8 @@ class BowlingSimple(gym.Env):
         render_mode: str | None = None,
         max_steps: int = 500,
         num_pins: int = 10,
-        pin_component: PinComponent | None = None,
+        pin_component: PinComponent | None = PinComponent.HEAD,
+        pins_fallen: bool = False,
         **kwargs: Any,
     ) -> None:
         if render_mode not in self.metadata["render_modes"] + [None]:
@@ -59,7 +62,7 @@ class BowlingSimple(gym.Env):
         self.max_steps: int = max_steps
         self.num_pins: int = num_pins
         self.bowling_scene: mujoco.MjModel = mujoco.MjModel.from_xml_string(
-            make_bowling_xml(include_pincer=True)
+            make_bowling_xml(include_pincer=True, pins_fallen=pins_fallen)
         )
         self.part: PinComponent | None = pin_component
         self.data = mujoco.MjData(self.bowling_scene)
@@ -73,7 +76,7 @@ class BowlingSimple(gym.Env):
         self._previous_pin_distance = 0.0
         self._last_action_time = 0.0
         self._last_action_dt = 0.0
-        self.task = "bowl the pins with the pincer"
+        self.task = "pick up the pins"
         self.control_dt = float(self.bowling_scene.opt.timestep * self.FRAME_SKIP)
         self._ee = PincerController(
             self.bowling_scene, self.data, control_dt=self.control_dt
@@ -143,6 +146,47 @@ class BowlingSimple(gym.Env):
             )
         return min(clearances)
 
+    def both_touching_pins(self) -> bool:
+        if self.part is None or self._target_pin_id is None:
+            return bool(self._touching_pins())
+        pin_part_geom_id = self.pin2component_id[self.part][self._target_pin_id]
+        cube_geom_ids: set[int] = set(self._cube_geom_ids)
+        # geom1 is the cube1, geom2 is the cube2 or vice versa
+        # AND both are touching the same pin
+        for contact in self.data.contact:
+            geom1 = int(contact.geom1)
+            geom2 = int(contact.geom2)
+            # both cubes touching the same pin
+            if geom1 in cube_geom_ids and geom1 == pin_part_geom_id:
+                cube_geom_ids.remove(geom1)
+            if geom2 in cube_geom_ids and geom2 == pin_part_geom_id:
+                cube_geom_ids.remove(geom2)
+        return not bool(cube_geom_ids)
+
+    def pin_between_cubes(self) -> float:
+        if self.part is None or self._target_pin_id is None:
+            return 0.0
+        pin_part_geom_id = self.pin2component_id[self.part][self._target_pin_id]
+        cube1_pos = self.data.geom_xpos[self._cube_geom_ids[0]]
+        cube2_pos = self.data.geom_xpos[self._cube_geom_ids[1]]
+        pin_pos = self.data.geom_xpos[pin_part_geom_id]
+        cube1_to_cube2 = cube2_pos - cube1_pos
+        cube1_to_pin = pin_pos - cube1_pos
+        # project the pin position onto the line between the cubes
+        projection_length = np.dot(cube1_to_pin, cube1_to_cube2) / np.linalg.norm(
+            cube1_to_cube2
+        )
+        projection_point = (
+            cube1_pos
+            + (projection_length / np.linalg.norm(cube1_to_cube2)) * cube1_to_cube2
+        )
+
+        # distance from the pin to the line between the cubes
+        # double linear when outside the pincer, quite small when between pincers
+        # the reward includes the correct rotation
+        distance = 0.5 * np.linalg.norm(projection_point - cube1_pos - cube2_pos)
+        return float(distance)
+
     def _touching_pins(self) -> set[int]:
         touching = set()
         cube_geom_ids: set[int] = set(self._cube_geom_ids)
@@ -177,7 +221,7 @@ class BowlingSimple(gym.Env):
     def _select_target_pin(self, fallen_pin_ids: set[int]) -> None:
         pincer_position = self.data.xpos[self._ee.body_id]
         candidates: list[int] = [
-            body_id for body_id in self._pin_ids if body_id not in fallen_pin_ids
+            body_id for body_id in self._pin_ids if body_id in fallen_pin_ids
         ]
         self._target_pin_id = min(
             candidates,
@@ -374,23 +418,24 @@ class BowlingSimple(gym.Env):
         self._step_count += 1
         fallen_pin_ids: set[int] = self._fallen_pin_ids()
         fallen: int = len(fallen_pin_ids)
-        terminated: bool = fallen == self.num_pins
+        terminated: bool = fallen == 0
         truncated: bool = self._step_count >= self.max_steps
-        target_fell: bool = self._target_pin_id in fallen_pin_ids
-        if target_fell:
-            self._select_target_pin(fallen_pin_ids)
-            pin_distance: float = self._relevant_pin_distance()
-            distance_reward = 0.0
-        else:
-            pin_distance = self._relevant_pin_distance()
-            distance_progress: float = self._previous_pin_distance - pin_distance
-            distance_multiplier: float = (
-                self.AWAY_DISTANCE_MULTIPLIER if distance_progress < 0.0 else 1.0
-            )
-            distance_reward = (
-                self.DISTANCE_SCALE * distance_multiplier * distance_progress
-            )
+
+        # Reward for standing up
+        newly_stood_up: int = max(0, self._previous_fallen - fallen)
+        stood_up_reward: float = self.NEWLY_STOOD_UP_REWARD * float(newly_stood_up)
+        self._previous_fallen = fallen
+
+        # Reward for approach
+        pin_distance = self._relevant_pin_distance()
+        distance_progress: float = self._previous_pin_distance - pin_distance
+        distance_multiplier: float = (
+            self.AWAY_DISTANCE_MULTIPLIER if distance_progress < 0.0 else 1.0
+        )
+        distance_reward = self.DISTANCE_SCALE * distance_multiplier * distance_progress
         self._previous_pin_distance = pin_distance
+
+        # ground clearance
         ground_clearance: float = self._pincer_ground_clearance()
         ground_reward: float = -self.GROUND_PENALTY_SCALE * max(
             0.0, self.MIN_GROUND_CLEARANCE - ground_clearance
@@ -399,26 +444,30 @@ class BowlingSimple(gym.Env):
         action_reward: float = -self.ACTION_PENALTY_SCALE * float(
             np.dot(action, action)
         )
-        newly_fallen_pin_ids: set[int] = fallen_pin_ids - self._rewarded_fallen_pins
-        newly_fallen: int = len(newly_fallen_pin_ids)
-        fallen_reward: float = self.NEWLY_FALLEN_REWARD * float(newly_fallen)
-        self._rewarded_fallen_pins.update(newly_fallen_pin_ids)
-        self._previous_fallen = fallen
-        touching_pins: set[int] = self._touching_pins()
-        newly_touched_pins: set[int] = touching_pins - self._touched_pins
-        self._touched_pins.update(touching_pins)
-        touch_reward: float = self.PIN_TOUCH_REWARD * float(len(newly_touched_pins))
+
+        # reward for grasping
+        # pin between the cubes, but not touching the pin (2D projection)
+        between_reward: float = -self.BETWEEN_PIN_SCALE * self.pin_between_cubes()
+        touching_reward: float = self.PIN_TOUCH_REWARD * float(
+            self.both_touching_pins()
+        )
+        # touching_pins: set[int] = self._touching_pins()
+        # newly_touched_pins: set[int] = touching_pins - self._touched_pins
+        # self._touched_pins.update(touching_pins)
+        # touch_reward: float = self.PIN_TOUCH_REWARD * float(len(newly_touched_pins))
+
         success_reward: float = self.SUCCESS_REWARD if terminated else 0.0
         open_close_reward = 0.0
         time_reward: float = -self.TIME_PENALTY
         reward: float = (
             distance_reward
-            + fallen_reward
+            + stood_up_reward
             + open_close_reward
             + rotation_reward
             + ground_reward
             + action_reward
-            + touch_reward
+            + between_reward
+            + touching_reward
             + success_reward
             + time_reward
         )
@@ -431,24 +480,22 @@ class BowlingSimple(gym.Env):
             truncated,
             {
                 "fallen_pins": fallen,
-                "newly_fallen": newly_fallen,
-                "newly_touched_pins": len(newly_touched_pins),
                 "success": terminated,
                 "is_success": terminated,
                 "task": self.task,
                 "reward.distance": distance_reward,
                 "reward.rotation": rotation_reward,
                 "reward.ground_clearance": ground_reward,
-                "reward.fallen_pins": fallen_reward,
+                "reward.fallen_pins": stood_up_reward,
                 "reward.open_close": open_close_reward,
                 "reward.action": action_reward,
-                "reward.pin_touch": touch_reward,
+                "reward.pin_touch": touching_reward,
+                "reward.pin_between": between_reward,
                 "reward.success": success_reward,
                 "reward.time": time_reward,
                 "distance.relevant_pin": pin_distance,
                 "distance.ground_clearance": ground_clearance,
                 "pin.part": self.part.name if self.part is not None else None,
-                "pin.target_id": self._target_pin_id,
             },
         )
 
@@ -479,7 +526,7 @@ class BowlingSimple(gym.Env):
 
 
 if __name__ == "__main__":
-    env = BowlingSimple(render_mode="human")
+    env = BowlingPickUp(render_mode="human")
     try:
         env.reset()
         while env._viewer is None or env._viewer.is_running():

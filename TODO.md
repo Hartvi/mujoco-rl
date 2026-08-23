@@ -1,8 +1,8 @@
 # Pincer Bowling RL TODO
 
 ### 0. Developer
-- [ ] fix pre-commit & enforce proper formatting
-- [ ] add auto-generate stubs script
+- [x] fix pre-commit & enforce proper formatting
+- [x] add auto-generate stubs script
 - [ ] add requirements.txt
 
 ## 1. Validate the environment
@@ -94,6 +94,24 @@
 - [ ] Evaluate across multiple seeds.
 - [ ] Record periodic evaluation videos rather than rendering every training environment.
 - [x] Add a short smoke-training test suitable for regular regression checks.
+
+## 9. Knocking over => picking up
+- [ ] create env for picking up pins
+  - copy paste bowling_simple.py
+  - reset rewards to zero
+- [ ] generate grasping poses
+    - grasping pose is pin head position (or something else, TBD)
+- [ ] test for grasping pose: check through mujoco that collision is happening on both cubes
+- [ ] test for grasping pose: check that a closed gripper and moving causes a pin to move
+- [ ]
+
+## 10. Recording
+- [ ] record end-effector pose
+- [ ] record pin poses
+- [ ] generate inverse kinematics for each end effector pose
+- [ ] create list of cameras
+  - test to verify that each camera sees a different thing
+- [ ] record images for each step
 
 ## Suggested implementation order
 

@@ -26,6 +26,7 @@ from stable_baselines3.common.vec_env import (
     VecNormalize,
 )
 
+from bowling_pick_up import BowlingPickUp
 from bowling_scene import PinComponent
 from bowling_simple import BowlingSimple
 from pincer_controller import PincerController
@@ -43,6 +44,12 @@ REWARD_KEYS = (
     "reward.success",
     "reward.time",
 )
+
+
+ENV_TYPES = {
+    "BowlingSimple": BowlingSimple,
+    "BowlingPickUp": BowlingPickUp,
+}
 
 
 class StrictParser(argparse.ArgumentParser):
@@ -81,25 +88,30 @@ class StrictArgs(argparse.Namespace):
     log_interval: int
     progress_bar: bool
     pin_component: PinComponent | None
+    env_type: str
 
 
 def make_env(
-    episode_max_steps: int,
-    seed: int,
+    args: StrictArgs,
+    *,
     monitor_path: Path | None,
-    pin_component: PinComponent | None,
 ) -> Callable[[], gym.Env[Any, Any]]:
     def factory() -> gym.Env[Any, Any]:
         env: gym.Env[Any, Any] = gym.wrappers.FlattenObservation(
-            BowlingSimple(max_steps=episode_max_steps, pin_component=pin_component)
+            ENV_TYPES[args.env_type](
+                max_steps=args.episode_max_steps,
+                pin_component=args.pin_component,
+                num_pins=args.num_pins,
+                pins_fallen=args.pins_fallen,
+            )
         )
         env = Monitor(
             env,
             filename=str(monitor_path) if monitor_path is not None else None,
             info_keywords=("fallen_pins", "success"),
         )
-        env.reset(seed=seed)
-        env.action_space.seed(seed)
+        env.reset(seed=args.seed)
+        env.action_space.seed(args.seed)
         return env
 
     return factory
@@ -183,10 +195,8 @@ def train(args: StrictArgs) -> None:
 
     train_factories = [
         make_env(
-            args.episode_max_steps,
-            args.seed + rank,
-            output_dir / f"train_monitor_{rank}",
-            args.pin_component,
+            args,
+            monitor_path=output_dir / f"train_monitor_{rank}",
         )
         for rank in range(args.n_envs)
     ]
@@ -212,10 +222,8 @@ def train(args: StrictArgs) -> None:
     eval_base = DummyVecEnv(
         [
             make_env(
-                args.episode_max_steps,
-                args.seed + 10_000,
-                output_dir / "eval_monitor",
-                args.pin_component,
+                args,
+                monitor_path=output_dir / "eval_monitor",
             )
         ]
     )
@@ -366,6 +374,21 @@ def main() -> None:
     parser.add_argument("--progress-bar", action="store_true")
     parser.add_argument(
         "--pin-component", type=PinComponent, default=None, choices=list(PinComponent)
+    )
+    parser.add_argument(
+        "--env-type",
+        type=str,
+        default=BowlingSimple.__name__,
+    )
+    parser.add_argument(
+        "--num-pins",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
+        "--pins-fallen",
+        type=bool,
+        default=False,
     )
     train(parser.parse_args())
 
