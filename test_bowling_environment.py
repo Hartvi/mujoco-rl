@@ -9,6 +9,7 @@ from gymnasium.utils.env_checker import check_env as gymnasium_check_env
 from stable_baselines3.common.env_checker import check_env as sb3_check_env
 
 import pincer_controller
+from bowling_pick_up import BowlingPickUp
 from bowling_scene import make_bowling_xml
 from bowling_simple import BowlingSimple
 
@@ -261,6 +262,25 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertAlmostEqual(float(env._relevant_pin_distance()), float(expected))
         finally:
             env.close()
+
+    def test_num_pins_controls_simulated_pin_bodies(self) -> None:
+        for env_type in (BowlingSimple, BowlingPickUp):
+            env = env_type(num_pins=1)
+            try:
+                self.assertGreaterEqual(
+                    mujoco.mj_name2id(
+                        env.bowling_scene, mujoco.mjtObj.mjOBJ_BODY, "pin_1"
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    mujoco.mj_name2id(
+                        env.bowling_scene, mujoco.mjtObj.mjOBJ_BODY, "pin_2"
+                    ),
+                    -1,
+                )
+            finally:
+                env.close()
 
     def test_distance_targets_mid_pin_and_target_stays_stable(self) -> None:
         env = BowlingSimple(num_pins=2)

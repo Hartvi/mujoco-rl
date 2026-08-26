@@ -97,7 +97,13 @@ def _pincer_xml() -> str:
     """
 
 
-def make_bowling_xml(include_pincer: bool = False, pins_fallen: bool = False) -> str:
+def make_bowling_xml(
+    include_pincer: bool = False,
+    pins_fallen: bool = False,
+    num_pins: int = 10,
+) -> str:
+    if not 1 <= num_pins <= 10:
+        raise ValueError("num_pins must be between 1 and 10")
     positions = []
     spacing = 0.27
     for row in range(4):
@@ -105,7 +111,8 @@ def make_bowling_xml(include_pincer: bool = False, pins_fallen: bool = False) ->
         for column in range(row + 1):
             positions.append((x, (column - row / 2.0) * spacing))
     pins: str = "\n".join(
-        _pin_xml(i + 1, x, y, pins_fallen) for i, (x, y) in enumerate(positions)
+        _pin_xml(i + 1, x, y, pins_fallen)
+        for i, (x, y) in enumerate(positions[:num_pins])
     )
     pincer_constraints: str = (
         """

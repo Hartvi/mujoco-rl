@@ -52,7 +52,6 @@ class BowlingPickUp(gym.Env):
         num_pins: int = 10,
         pin_component: PinComponent | None = PinComponent.HEAD,
         pins_fallen: bool = False,
-        **kwargs: Any,
     ) -> None:
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
@@ -62,7 +61,11 @@ class BowlingPickUp(gym.Env):
         self.max_steps: int = max_steps
         self.num_pins: int = num_pins
         self.bowling_scene: mujoco.MjModel = mujoco.MjModel.from_xml_string(
-            make_bowling_xml(include_pincer=True, pins_fallen=pins_fallen)
+            make_bowling_xml(
+                include_pincer=True,
+                pins_fallen=pins_fallen,
+                num_pins=num_pins,
+            )
         )
         self.part: PinComponent | None = pin_component
         self.data = mujoco.MjData(self.bowling_scene)
@@ -70,7 +73,7 @@ class BowlingPickUp(gym.Env):
         self._renderer: mujoco.Renderer | None = None
         self._step_count = 0
         self._previous_fallen = 0
-        self._rewarded_fallen_pins: set[int] = set()
+        self._rewarded_picked_up_pins: set[int] = set()
         self._target_pin_id: int | None = None
         self._touched_pins: set[int] = set()
         self._previous_pin_distance = 0.0
@@ -273,6 +276,10 @@ class BowlingPickUp(gym.Env):
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
     ) -> tuple[ObsType, dict[str, Any]]:
+        """
+        reset:
+          set pins to knocked over state
+        """
         super().reset(seed=seed)
         mujoco.mj_resetData(self.bowling_scene, self.data)
         self.data.qpos[:] = self.bowling_scene.qpos0
@@ -284,14 +291,17 @@ class BowlingPickUp(gym.Env):
         self._ee.sync_target_to_pose()
         mujoco.mj_forward(self.bowling_scene, self.data)
         self._step_count = 0
-        self._previous_fallen = 0
-        self._rewarded_fallen_pins.clear()
+        self._previous_fallen = self.num_pins
+        self._rewarded_picked_up_pins.clear()
         self._select_target_pin(set())
         self._touched_pins.clear()
         self._previous_pin_distance = self._relevant_pin_distance()
         self._last_action_time = float(self.data.time)
         self._last_action_dt = 0.0
-        return self._get_observation(), {"fallen_pins": 0, "task": self.task}
+        return self._get_observation(), {
+            "fallen_pins": self._previous_fallen,
+            "task": self.task,
+        }
 
     def _body_velocity(self, body_id: int) -> np.ndarray:
         velocity: np.ndarray[tuple[int], np.dtype[np.float64]] = np.zeros(

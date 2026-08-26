@@ -49,7 +49,6 @@ class BowlingSimple(gym.Env):
         max_steps: int = 500,
         num_pins: int = 10,
         pin_component: PinComponent | None = None,
-        **kwargs: Any,
     ) -> None:
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
@@ -59,7 +58,7 @@ class BowlingSimple(gym.Env):
         self.max_steps: int = max_steps
         self.num_pins: int = num_pins
         self.bowling_scene: mujoco.MjModel = mujoco.MjModel.from_xml_string(
-            make_bowling_xml(include_pincer=True)
+            make_bowling_xml(include_pincer=True, num_pins=num_pins)
         )
         self.part: PinComponent | None = pin_component
         self.data = mujoco.MjData(self.bowling_scene)
