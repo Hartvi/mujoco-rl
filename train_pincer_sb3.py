@@ -49,6 +49,7 @@ class StrictParser(argparse.ArgumentParser):
                 num_pins=namespace.num_pins,
                 pin_component=namespace.pin_component,
                 pins_fallen=namespace.pins_fallen,
+                render=namespace.render,
             )
         except ValueError as error:
             self.error(str(error))
@@ -90,6 +91,7 @@ class TrainingConfig:
     num_pins: int | None = None
     pin_component: PinComponent | None = None
     pins_fallen: bool | None = None
+    render: str | None = None
 
     def resolved_env_config(self) -> BowlingEnvConfig:
         if self.env_config is not None:
@@ -100,6 +102,7 @@ class TrainingConfig:
             num_pins=self.num_pins,
             pin_component=self.pin_component,
             pins_fallen=self.pins_fallen,
+            render=self.render,
         )
 
 
@@ -390,6 +393,7 @@ def main() -> None:
         type=parse_bool,
         default=None,
     )
+    parser.add_argument("--render", type=str)
     train(parser.parse_args())
 
 

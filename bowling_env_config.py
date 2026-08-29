@@ -45,6 +45,7 @@ class BowlingEnvConfig:
     num_pins: int = 10
     pin_component: PinComponent | None = None
     pins_fallen: bool | None = None
+    render: str | None = None
 
     def constructor_kwargs(self, render_mode: str | None = None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
@@ -69,11 +70,11 @@ def parse_bool(value: str | bool) -> bool:
     if isinstance(value, bool):
         return value
     normalized = value.lower()
-    if normalized in {"1", "true"}:
+    if normalized in {"1", "true", "on"}:
         return True
-    if normalized in {"0", "false"}:
+    if normalized in {"0", "false", "off"}:
         return False
-    raise ValueError("expected one of: 0, 1, true, false")
+    raise ValueError("expected one of: 0, 1, true, false, on, off")
 
 
 def parse_pin_component(value: str | PinComponent | None) -> PinComponent | None:
@@ -91,6 +92,7 @@ def resolve_env_config(
     num_pins: int | None = None,
     pin_component: str | PinComponent | None = "auto",
     pins_fallen: str | bool | None = None,
+    render: str | None = None,
 ) -> BowlingEnvConfig:
     if env_type not in ENV_TYPES:
         raise ValueError(f"unknown environment {env_type!r}")
@@ -108,6 +110,7 @@ def resolve_env_config(
             num_pins=10 if num_pins is None else num_pins,
             pin_component=resolved_component,
             pins_fallen=None,
+            render=render,
         )
     resolved_component = (
         PinComponent.HEAD
@@ -120,6 +123,7 @@ def resolve_env_config(
         num_pins=1 if num_pins is None else num_pins,
         pin_component=resolved_component,
         pins_fallen=True if pins_fallen is None else parse_bool(pins_fallen),
+        render=render,
     )
 
 
@@ -147,7 +151,7 @@ def env_config_from_mapping(
 def make_raw_env(
     config: BowlingEnvConfig, *, render_mode: str | None = None
 ) -> BowlingSimple | BowlingPickUp:
-    spec = ENV_REGISTRY[config.env_type]
+    spec: BowlingEnvSpec = ENV_REGISTRY[config.env_type]
     kwargs = config.constructor_kwargs(render_mode)
     unsupported = kwargs.keys() - spec.supported_options
     if unsupported:
@@ -164,7 +168,9 @@ def make_env_factory(
     def factory() -> gym.Env[Any, Any]:
         # Scene construction itself samples pin poses with Python's RNG.
         random.seed(seed)
-        env: gym.Env[Any, Any] = gym.wrappers.FlattenObservation(make_raw_env(config))
+        env: gym.Env[Any, Any] = gym.wrappers.FlattenObservation(
+            make_raw_env(config=config, render_mode=config.render)
+        )
         env = Monitor(
             env,
             filename=monitor_path,
