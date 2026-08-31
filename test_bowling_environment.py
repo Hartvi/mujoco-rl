@@ -10,7 +10,7 @@ from stable_baselines3.common.env_checker import check_env as sb3_check_env
 
 import pincer_controller
 from bowling_pick_up import BowlingPickUp
-from bowling_scene import make_bowling_xml
+from bowling_scene import make_bowling_xml, PinComponent
 from bowling_simple import BowlingSimple
 
 
@@ -581,6 +581,35 @@ class BowlingEnvironmentTest(unittest.TestCase):
                     for other in pair
                 )
             )
+        finally:
+            env.close()
+
+    def test_between_pincer_is_zero(self) -> None:
+        env = BowlingPickUp(num_pins=1)
+        try:
+            env.reset()
+            env._target_pin_id = env._pin_ids[0]
+            pin_head = env._pin_component_ids[PinComponent.HEAD][0]
+            ee_position = slice(env._ee.object_qpos_id, env._ee.object_qpos_id + 3)
+
+            cube1 = env.data.geom_xpos[env._cube_geom_ids[0]].copy()
+            cube2 = env.data.geom_xpos[env._cube_geom_ids[1]].copy()
+            pin = env.data.geom_xpos[pin_head].copy()
+            cube_midpoint = 0.5 * (cube1 + cube2)
+
+            env.data.qpos[ee_position] += pin - cube_midpoint
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            centered_distance = env.pin_between_cubes()
+            print(f"{centered_distance=}")
+            self.assertAlmostEqual(centered_distance, 0.0, places=7)
+
+            env.data.qpos[ee_position] += np.array([1.0, 1.0, 1.0])
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            displaced_distance = env.pin_between_cubes()
+            print(f"{displaced_distance=}")
+            self.assertGreater(displaced_distance, 0.0)
         finally:
             env.close()
 

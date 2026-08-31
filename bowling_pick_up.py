@@ -168,7 +168,7 @@ class BowlingPickUp(gym.Env):
 
     def pin_between_cubes(self) -> float:
         if self.part is None or self._target_pin_id is None:
-            return 0.0
+            raise ValueError(f"{self.part is None=} or {self._target_pin_id is None=}")
         pin_part_geom_id = self.pin2component_id[self.part][self._target_pin_id]
         cube1_pos = self.data.geom_xpos[self._cube_geom_ids[0]]
         cube2_pos = self.data.geom_xpos[self._cube_geom_ids[1]]
@@ -184,10 +184,9 @@ class BowlingPickUp(gym.Env):
             + (projection_length / np.linalg.norm(cube1_to_cube2)) * cube1_to_cube2
         )
 
-        # distance from the pin to the line between the cubes
-        # double linear when outside the pincer, quite small when between pincers
-        # the reward includes the correct rotation
-        distance = 0.5 * np.linalg.norm(projection_point - cube1_pos - cube2_pos)
+        # distance from the pin to the axis of the cubes
+        cube_midpoint = 0.5 * (cube1_pos + cube2_pos)
+        distance = np.linalg.norm(projection_point - cube_midpoint)
         return float(distance)
 
     def _touching_pins(self) -> set[int]:
