@@ -9,7 +9,8 @@ from gymnasium.utils.env_checker import check_env as gymnasium_check_env
 from stable_baselines3.common.env_checker import check_env as sb3_check_env
 
 import pincer_controller
-from bowling_scene import make_bowling_xml
+from bowling_pick_up import BowlingPickUp
+from bowling_scene import make_bowling_xml, PinComponent
 from bowling_simple import BowlingSimple
 
 
@@ -261,6 +262,25 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertAlmostEqual(float(env._relevant_pin_distance()), float(expected))
         finally:
             env.close()
+
+    def test_num_pins_controls_simulated_pin_bodies(self) -> None:
+        for env_type in (BowlingSimple, BowlingPickUp):
+            env = env_type(num_pins=1)
+            try:
+                self.assertGreaterEqual(
+                    mujoco.mj_name2id(
+                        env.bowling_scene, mujoco.mjtObj.mjOBJ_BODY, "pin_1"
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    mujoco.mj_name2id(
+                        env.bowling_scene, mujoco.mjtObj.mjOBJ_BODY, "pin_2"
+                    ),
+                    -1,
+                )
+            finally:
+                env.close()
 
     def test_distance_targets_mid_pin_and_target_stays_stable(self) -> None:
         env = BowlingSimple(num_pins=2)
@@ -561,6 +581,102 @@ class BowlingEnvironmentTest(unittest.TestCase):
                     for other in pair
                 )
             )
+        finally:
+            env.close()
+
+    def test_between_pincer_is_zero(self) -> None:
+        env = BowlingPickUp(num_pins=1)
+        try:
+            env.reset()
+            env._target_pin_id = env._pin_ids[0]
+            pin_head = env._pin_component_ids[PinComponent.HEAD][0]
+            ee_position = slice(env._ee.object_qpos_id, env._ee.object_qpos_id + 3)
+
+            cube1 = env.data.geom_xpos[env._cube_geom_ids[0]].copy()
+            cube2 = env.data.geom_xpos[env._cube_geom_ids[1]].copy()
+            pin = env.data.geom_xpos[pin_head].copy()
+            cube_midpoint = 0.5 * (cube1 + cube2)
+
+            env.data.qpos[ee_position] += pin - cube_midpoint
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            centered_distance = env.pin_between_cubes()
+            print(f"{centered_distance=}")
+            self.assertAlmostEqual(centered_distance, 0.0, places=7)
+
+            env.data.qpos[ee_position] += np.array([1.0, 1.0, 1.0])
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            displaced_distance = env.pin_between_cubes()
+            print(f"{displaced_distance=}")
+            self.assertGreater(displaced_distance, 0.0)
+        finally:
+            env.close()
+
+    def test_both_touching(self) -> None:
+        env = BowlingPickUp(num_pins=1)
+        try:
+            env.reset()
+            env._target_pin_id = env._pin_ids[0]
+            pin_head = env._pin_component_ids[PinComponent.HEAD][0]
+            ee_position = slice(env._ee.object_qpos_id, env._ee.object_qpos_id + 3)
+
+            cube1 = env.data.geom_xpos[env._cube_geom_ids[0]].copy()
+            cube2 = env.data.geom_xpos[env._cube_geom_ids[1]].copy()
+            pin = env.data.geom_xpos[pin_head].copy()
+            cube_midpoint = 0.5 * (cube1 + cube2)
+
+            env.data.qpos[ee_position] += pin - cube_midpoint
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            self.assertTrue(env.both_touching_pins())
+
+            closed_distance = env.data.qpos[env._ee.qpos_id]
+            cube_side = float(env.bowling_scene.geom_size[env._cube_geom_ids[0], 0])
+            self.assertAlmostEqual(
+                cube_side,
+                float(env.bowling_scene.geom_size[env._cube_geom_ids[1], 0]),
+            )
+            sphere_radius = float(env.bowling_scene.geom_size[pin_head, 0])
+            contact_distance = 2 * cube_side + 2 * sphere_radius
+            touching_by_distance = []
+            for distance in np.linspace(
+                closed_distance, env._ee.distance_range[1], num=11
+            ):
+                env.data.qpos[env._ee.qpos_id] = distance
+                mujoco.mj_forward(env.bowling_scene, env.data)
+
+                cube_midpoint = np.mean(env.data.geom_xpos[env._cube_geom_ids], axis=0)
+                env.data.qpos[ee_position] += (
+                    env.data.geom_xpos[pin_head] - cube_midpoint
+                )
+                mujoco.mj_forward(env.bowling_scene, env.data)
+
+                np.testing.assert_allclose(
+                    env.data.geom_xpos[pin_head],
+                    np.mean(env.data.geom_xpos[env._cube_geom_ids], axis=0),
+                    atol=0.001,
+                )
+                both_touching = env.both_touching_pins()
+                print(f"{distance=}, {both_touching=}")
+                if not np.isclose(distance, contact_distance, atol=1e-9):
+                    if distance < contact_distance:
+                        self.assertTrue(both_touching)
+                    elif distance > contact_distance:
+                        self.assertFalse(both_touching)
+                touching_by_distance.append(both_touching)
+
+            self.assertTrue(touching_by_distance[0])
+            self.assertFalse(touching_by_distance[-1])
+            self.assertEqual(
+                touching_by_distance, sorted(touching_by_distance, reverse=True)
+            )
+
+            env.data.qpos[env._ee.qpos_id] = closed_distance
+            env.data.qpos[ee_position] += np.array([1.0, 1.0, 1.0])
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            self.assertFalse(env.both_touching_pins())
         finally:
             env.close()
 

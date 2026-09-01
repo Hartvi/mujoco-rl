@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, cast, Sequence
+from typing import cast, Sequence
 
-import gymnasium as gym
 import numpy as np
 import torch
 from stable_baselines3 import PPO
@@ -17,7 +17,6 @@ from stable_baselines3.common.callbacks import (
     CheckpointCallback,
     EvalCallback,
 )
-from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import (
     DummyVecEnv,
@@ -26,83 +25,89 @@ from stable_baselines3.common.vec_env import (
     VecNormalize,
 )
 
+from bowling_env_config import (
+    BowlingEnvConfig,
+    ENV_TYPES,
+    make_env_factory,
+    parse_bool,
+    resolve_env_config,
+)
 from bowling_scene import PinComponent
-from bowling_simple import BowlingSimple
 from pincer_controller import PincerController
 from torch_device import resolve_device_name
-
-
-REWARD_KEYS = (
-    "reward.distance",
-    "reward.rotation",
-    "reward.ground_clearance",
-    "reward.fallen_pins",
-    "reward.open_close",
-    "reward.action",
-    "reward.pin_touch",
-    "reward.success",
-    "reward.time",
-)
 
 
 class StrictParser(argparse.ArgumentParser):
     """Strict bowling parser that encodes correctness of arguments using types."""
 
-    def parse_args(self, args: Sequence[str] | None = None) -> StrictArgs:  # type: ignore
-        return cast(StrictArgs, super().parse_args(args))
+    def parse_args(self, args: Sequence[str] | None = None) -> TrainingConfig:  # type: ignore
+        namespace = super().parse_args(args)
+        try:
+            env_config = resolve_env_config(
+                env_type=namespace.env_type,
+                max_steps=namespace.episode_max_steps,
+                num_pins=namespace.num_pins,
+                pin_component=namespace.pin_component,
+                pins_fallen=namespace.pins_fallen,
+                render=namespace.render,
+            )
+        except ValueError as error:
+            self.error(str(error))
+        values = vars(namespace)
+        for key in ("env_type", "num_pins", "pin_component", "pins_fallen"):
+            values.pop(key)
+        return TrainingConfig(env_config=env_config, **values)
 
 
-class StrictArgs(argparse.Namespace):
-    """Strict bowling namespace that encodes
-    correctness of namespace arguments using types."""
+@dataclass(frozen=True)
+class TrainingConfig:
+    total_timesteps: int = 1_000_000
+    n_steps: int = 512
+    n_envs: int = 4
+    start_method: str = "forkserver"
+    batch_size: int = 128
+    epochs: int = 4
+    episode_max_steps: int = 1500
+    learning_rate: float = 3e-4
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    clip: float = 0.2
+    entropy_coef: float = 0.01
+    value_coef: float = 0.5
+    device: str = "auto"
+    seed: int = 0
+    output_dir: str = "runs/pincer_sb3"
+    tensorboard_log: str = "auto"
+    resume: str = ""
+    vecnormalize: str = ""
+    checkpoint_freq: int = 50_000
+    eval_freq: int = 25_000
+    eval_episodes: int = 5
+    log_interval: int = 1
+    progress_bar: bool = False
+    env_config: BowlingEnvConfig | None = None
+    # Compatibility for programmatic callers of the former StrictArgs namespace.
+    env_type: str = "BowlingSimple"
+    num_pins: int | None = None
+    pin_component: PinComponent | None = None
+    pins_fallen: bool | None = None
+    render: str | None = None
 
-    batch_size: int
-    total_timesteps: int
-    n_steps: int
-    n_envs: int
-    start_method: str
-    epochs: int
-    episode_max_steps: int
-    learning_rate: float
-    gamma: float
-    gae_lambda: float
-    clip: float
-    entropy_coef: float
-    value_coef: float
-    device: str
-    seed: int
-    output_dir: str
-    tensorboard_log: str
-    resume: str
-    vecnormalize: str
-    checkpoint_freq: int
-    eval_freq: int
-    eval_episodes: int
-    log_interval: int
-    progress_bar: bool
-    pin_component: PinComponent | None
-
-
-def make_env(
-    episode_max_steps: int,
-    seed: int,
-    monitor_path: Path | None,
-    pin_component: PinComponent | None,
-) -> Callable[[], gym.Env[Any, Any]]:
-    def factory() -> gym.Env[Any, Any]:
-        env: gym.Env[Any, Any] = gym.wrappers.FlattenObservation(
-            BowlingSimple(max_steps=episode_max_steps, pin_component=pin_component)
+    def resolved_env_config(self) -> BowlingEnvConfig:
+        if self.env_config is not None:
+            return self.env_config
+        return resolve_env_config(
+            env_type=self.env_type,
+            max_steps=self.episode_max_steps,
+            num_pins=self.num_pins,
+            pin_component=self.pin_component,
+            pins_fallen=self.pins_fallen,
+            render=self.render,
         )
-        env = Monitor(
-            env,
-            filename=str(monitor_path) if monitor_path is not None else None,
-            info_keywords=("fallen_pins", "success"),
-        )
-        env.reset(seed=seed)
-        env.action_space.seed(seed)
-        return env
 
-    return factory
+
+# Kept as an import-compatible name while callers migrate to TrainingConfig.
+StrictArgs = TrainingConfig
 
 
 class RewardLoggingCallback(BaseCallback):
@@ -110,15 +115,17 @@ class RewardLoggingCallback(BaseCallback):
 
     def __init__(self) -> None:
         super().__init__()
-        self.values: dict[str, list[float]] = {key: [] for key in REWARD_KEYS}
+        self.values: dict[str, list[float]] = {}
         self.fallen: list[float] = []
         self.distances: list[float] = []
 
     def _on_step(self) -> bool:
         for info in self.locals.get("infos", []):
-            for key in REWARD_KEYS:
-                if key in info:
-                    self.values[key].append(float(info[key]))
+            for key, value in info.items():
+                if key.startswith(("reward.", "distance.")) and isinstance(
+                    value, (int, float, np.number)
+                ):
+                    self.values.setdefault(key, []).append(float(value))
             if "fallen_pins" in info:
                 self.fallen.append(float(info["fallen_pins"]))
             if "distance.relevant_pin" in info:
@@ -132,6 +139,7 @@ class RewardLoggingCallback(BaseCallback):
                 values.clear()
         if self.fallen:
             self.logger.record("task/mean_fallen_pins", float(np.mean(self.fallen)))
+            self.logger.record("task/min_fallen_pins", min(self.fallen))
             self.logger.record("task/max_fallen_pins", max(self.fallen))
             self.fallen.clear()
         if self.distances:
@@ -163,7 +171,8 @@ def _resolve_resume_stats(resume: Path, explicit: str) -> Path | None:
     return next((path for path in candidates if path.exists()), None)
 
 
-def train(args: StrictArgs) -> None:
+def train(args: TrainingConfig) -> None:
+    env_config = args.resolved_env_config()
     rollout_size = args.n_steps * args.n_envs
     if rollout_size % args.batch_size != 0:
         raise ValueError(
@@ -182,11 +191,10 @@ def train(args: StrictArgs) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
     train_factories = [
-        make_env(
-            args.episode_max_steps,
-            args.seed + rank,
-            output_dir / f"train_monitor_{rank}",
-            args.pin_component,
+        make_env_factory(
+            env_config,
+            seed=args.seed + rank,
+            monitor_path=str(output_dir / f"train_monitor_{rank}"),
         )
         for rank in range(args.n_envs)
     ]
@@ -211,11 +219,10 @@ def train(args: StrictArgs) -> None:
 
     eval_base = DummyVecEnv(
         [
-            make_env(
-                args.episode_max_steps,
-                args.seed + 10_000,
-                output_dir / "eval_monitor",
-                args.pin_component,
+            make_env_factory(
+                env_config,
+                seed=args.seed + args.n_envs,
+                monitor_path=str(output_dir / "eval_monitor"),
             )
         ]
     )
@@ -280,7 +287,8 @@ def train(args: StrictArgs) -> None:
         ]
     )
 
-    config = vars(args).copy()
+    config = asdict(args)
+    config["env_config"] = env_config.to_json()
     config["device"] = device
     config["action_semantics"] = [
         "vx",
@@ -365,8 +373,27 @@ def main() -> None:
     parser.add_argument("--log-interval", type=int, default=1)
     parser.add_argument("--progress-bar", action="store_true")
     parser.add_argument(
-        "--pin-component", type=PinComponent, default=None, choices=list(PinComponent)
+        "--pin-component",
+        default="auto",
+        choices=("auto", "none", *(item.value for item in PinComponent)),
     )
+    parser.add_argument(
+        "--env-type",
+        type=str,
+        choices=tuple(ENV_TYPES),
+        default="BowlingSimple",
+    )
+    parser.add_argument(
+        "--num-pins",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--pins-fallen",
+        type=parse_bool,
+        default=None,
+    )
+    parser.add_argument("--render", type=str)
     train(parser.parse_args())
 
 
