@@ -160,9 +160,9 @@ class BowlingPickUp(gym.Env):
             geom1 = int(contact.geom1)
             geom2 = int(contact.geom2)
             # both cubes touching the same pin
-            if geom1 in cube_geom_ids and geom1 == pin_part_geom_id:
+            if geom1 in cube_geom_ids and geom2 == pin_part_geom_id:
                 cube_geom_ids.remove(geom1)
-            if geom2 in cube_geom_ids and geom2 == pin_part_geom_id:
+            if geom2 in cube_geom_ids and geom1 == pin_part_geom_id:
                 cube_geom_ids.remove(geom2)
         return not bool(cube_geom_ids)
 
