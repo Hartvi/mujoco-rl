@@ -455,6 +455,8 @@ class BowlingPickUp(gym.Env):
         )
 
         # reward for grasping
+        """the closer the gripper is,
+        the more weight should be put on the correct rotation"""
         # pin between the cubes, but not touching the pin (2D projection)
         between_reward: float = -self.BETWEEN_PIN_SCALE * self.pin_between_cubes()
         touching_reward: float = self.PIN_TOUCH_REWARD * float(

@@ -632,6 +632,13 @@ class BowlingEnvironmentTest(unittest.TestCase):
             self.assertTrue(env.both_touching_pins())
 
             closed_distance = env.data.qpos[env._ee.qpos_id]
+            cube_side = float(env.bowling_scene.geom_size[env._cube_geom_ids[0], 0])
+            self.assertAlmostEqual(
+                cube_side,
+                float(env.bowling_scene.geom_size[env._cube_geom_ids[1], 0]),
+            )
+            sphere_radius = float(env.bowling_scene.geom_size[pin_head, 0])
+            contact_distance = 2 * cube_side + 2 * sphere_radius
             touching_by_distance = []
             for distance in np.linspace(
                 closed_distance, env._ee.distance_range[1], num=11
@@ -652,11 +659,11 @@ class BowlingEnvironmentTest(unittest.TestCase):
                 )
                 both_touching = env.both_touching_pins()
                 print(f"{distance=}, {both_touching=}")
-                contact_distance = 2 * (
-                    env.bowling_scene.geom_size[pin_head, 0]
-                    + env.bowling_scene.geom_size[env._cube_geom_ids[0], 0]
-                )
-                self.assertEqual(both_touching, distance < contact_distance - 1e-9)
+                if not np.isclose(distance, contact_distance, atol=1e-9):
+                    if distance < contact_distance:
+                        self.assertTrue(both_touching)
+                    elif distance > contact_distance:
+                        self.assertFalse(both_touching)
                 touching_by_distance.append(both_touching)
 
             self.assertTrue(touching_by_distance[0])
