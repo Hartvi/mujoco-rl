@@ -11,7 +11,7 @@ import numpy as np
 class PincerController:
     """Controller for the cube pair pose and actuated distance."""
 
-    DISTANCE_JOINT = "cube_distance"
+    DISTANCE_JOINT = "cube_distance_right"
     DISTANCE_ACTUATOR = "distance_command"
     POSITION_KP = 200.0
     POSITION_KD = 20.0
@@ -49,8 +49,9 @@ class PincerController:
             mujoco.mjtObj.mjOBJ_ACTUATOR, self.DISTANCE_ACTUATOR
         )
         self.qpos_id = int(model.jnt_qposadr[self.joint_id])
-        self.distance_range = model.jnt_range[self.joint_id].copy()
-        self.target_distance = float(data.qpos[self.qpos_id])
+        # Each cube travels half of the commanded center-to-center distance.
+        self.distance_range = 2.0 * model.jnt_range[self.joint_id]
+        self.target_distance = 2.0 * float(data.qpos[self.qpos_id])
         self.target_position: np.ndarray[tuple[Any, ...], np.dtype[np.float64]] = (
             data.qpos[self.object_qpos_id : self.object_qpos_id + 3].copy()
         )
@@ -75,7 +76,7 @@ class PincerController:
 
     def sync_target_to_pose(self) -> None:
         """Make the current simulated pose the controller target."""
-        self.target_distance = float(self.data.qpos[self.qpos_id])
+        self.target_distance = 2.0 * float(self.data.qpos[self.qpos_id])
         self.target_position = self.data.qpos[
             self.object_qpos_id : self.object_qpos_id + 3
         ].copy()
@@ -93,7 +94,7 @@ class PincerController:
         )
         mujoco.mju_quat2Vel(orientation, self.data.xquat[self.body_id], 1.0)
         return np.concatenate(
-            (position, orientation, [self.data.qpos[self.qpos_id]])
+            (position, orientation, [2.0 * self.data.qpos[self.qpos_id]])
         ).astype(np.float32)
 
     def apply_delta(self, action: np.ndarray) -> None:

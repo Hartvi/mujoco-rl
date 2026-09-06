@@ -44,6 +44,33 @@ class BowlingEnvironmentTest(unittest.TestCase):
             make_bowling_xml(include_pincer=True).count('name="cube_pair"'), 1
         )
 
+    def test_pincer_cubes_move_symmetrically_with_same_distance_limits(self) -> None:
+        env = BowlingSimple()
+        try:
+            left_joint = mujoco.mj_name2id(
+                env.bowling_scene, mujoco.mjtObj.mjOBJ_JOINT, "cube_distance_left"
+            )
+            right_joint = mujoco.mj_name2id(
+                env.bowling_scene, mujoco.mjtObj.mjOBJ_JOINT, "cube_distance_right"
+            )
+            left_qpos = int(env.bowling_scene.jnt_qposadr[left_joint])
+            right_qpos = int(env.bowling_scene.jnt_qposadr[right_joint])
+
+            np.testing.assert_allclose(env._ee.distance_range, [0.02, 0.12])
+            env._ee.target_distance = 0.10
+            env._ee.hold_pose()
+            for _ in range(500):
+                mujoco.mj_step(env.bowling_scene, env.data)
+                env._ee.hold_pose()
+
+            self.assertAlmostEqual(
+                env.data.qpos[left_qpos], env.data.qpos[right_qpos], places=5
+            )
+            self.assertGreater(2.0 * env.data.qpos[right_qpos], 0.09)
+            self.assertAlmostEqual(env.data.ctrl[env._ee.actuator_id], 0.10)
+        finally:
+            env.close()
+
     def test_reset_restores_full_episode_state(self) -> None:
         env = BowlingSimple(max_steps=5)
         try:
@@ -631,7 +658,11 @@ class BowlingEnvironmentTest(unittest.TestCase):
 
             self.assertTrue(env.both_touching_pins())
 
-            closed_distance = env.data.qpos[env._ee.qpos_id]
+            left_joint = mujoco.mj_name2id(
+                env.bowling_scene, mujoco.mjtObj.mjOBJ_JOINT, "cube_distance_left"
+            )
+            left_qpos = int(env.bowling_scene.jnt_qposadr[left_joint])
+            closed_distance = 2.0 * env.data.qpos[env._ee.qpos_id]
             cube_side = float(env.bowling_scene.geom_size[env._cube_geom_ids[0], 0])
             self.assertAlmostEqual(
                 cube_side,
@@ -643,7 +674,8 @@ class BowlingEnvironmentTest(unittest.TestCase):
             for distance in np.linspace(
                 closed_distance, env._ee.distance_range[1], num=11
             ):
-                env.data.qpos[env._ee.qpos_id] = distance
+                env.data.qpos[left_qpos] = distance / 2.0
+                env.data.qpos[env._ee.qpos_id] = distance / 2.0
                 mujoco.mj_forward(env.bowling_scene, env.data)
 
                 cube_midpoint = np.mean(env.data.geom_xpos[env._cube_geom_ids], axis=0)
@@ -672,7 +704,8 @@ class BowlingEnvironmentTest(unittest.TestCase):
                 touching_by_distance, sorted(touching_by_distance, reverse=True)
             )
 
-            env.data.qpos[env._ee.qpos_id] = closed_distance
+            env.data.qpos[left_qpos] = closed_distance / 2.0
+            env.data.qpos[env._ee.qpos_id] = closed_distance / 2.0
             env.data.qpos[ee_position] += np.array([1.0, 1.0, 1.0])
             mujoco.mj_forward(env.bowling_scene, env.data)
 

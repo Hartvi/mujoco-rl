@@ -87,10 +87,11 @@ def _pincer_xml() -> str:
       <joint name="object_pose" type="free" damping="1"/>
       <geom name="pincer_center_mass" type="box" size="0.01 0.01 0.01" mass="1.0" contype="0" conaffinity="0" rgba="0 0 0 0"/>
       <body name="cube_1_body" pos="-0.01 0 0">
+        <joint name="cube_distance_left" type="slide" axis="-1 0 0" limited="true" range="0.01 0.06" ref="0.01" damping="0.2"/>
         <geom name="cube_1" type="box" size="0.01 0.01 0.01" mass="0.05" condim="3" rgba="0.2 0.5 0.9 1"/>
       </body>
       <body name="cube_2_body" pos="0.01 0 0">
-        <joint name="cube_distance" type="slide" axis="1 0 0" limited="true" range="0.02 0.12" ref="0.02" damping="0.2"/>
+        <joint name="cube_distance_right" type="slide" axis="1 0 0" limited="true" range="0.01 0.06" ref="0.01" damping="0.2"/>
         <geom name="cube_2" type="box" size="0.01 0.01 0.01" mass="0.05" condim="3" rgba="0.9 0.3 0.2 1"/>
       </body>
     </body>
@@ -145,6 +146,8 @@ def make_bowling_xml(
     {_pincer_xml() if include_pincer else _panda_xml()}
   </worldbody>
   {pincer_constraints}
+  {('<equality><joint joint1="cube_distance_left" joint2="cube_distance_right" polycoef="0 1 0 0 0"/></equality>' if include_pincer else '')}
+  {('<tendon><fixed name="pincer_distance"><joint joint="cube_distance_left" coef="1"/><joint joint="cube_distance_right" coef="1"/></fixed></tendon>' if include_pincer else '')}
 
   <actuator>
     {
@@ -157,7 +160,7 @@ def make_bowling_xml(
                 'kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" '
                 'joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>'
             ) if not include_pincer else '<position name="distance_command" '
-            'joint="cube_distance" kp="100" ctrllimited="true" '
+            'tendon="pincer_distance" kp="100" ctrllimited="true" '
             'ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>'
         )
     }
