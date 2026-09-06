@@ -51,7 +51,7 @@ class BowlingPickUp(gym.Env):
         max_steps: int = 500,
         num_pins: int = 10,
         pin_component: PinComponent | None = PinComponent.HEAD,
-        pins_fallen: bool = False,
+        pins_fallen: bool = True,
     ) -> None:
         if render_mode not in self.metadata["render_modes"] + [None]:
             raise ValueError(f"Unsupported render_mode: {render_mode}")
@@ -151,7 +151,7 @@ class BowlingPickUp(gym.Env):
 
     def both_touching_pins(self) -> bool:
         if self.part is None or self._target_pin_id is None:
-            return bool(self._touching_pins())
+            return False
         pin_part_geom_id = self.pin2component_id[self.part][self._target_pin_id]
         cube_geom_ids: set[int] = set(self._cube_geom_ids)
         # geom1 is the cube1, geom2 is the cube2 or vice versa
@@ -168,7 +168,7 @@ class BowlingPickUp(gym.Env):
 
     def pin_between_cubes(self) -> float:
         if self.part is None or self._target_pin_id is None:
-            raise ValueError(f"{self.part is None=} or {self._target_pin_id is None=}")
+            return 0.0
         pin_part_geom_id = self.pin2component_id[self.part][self._target_pin_id]
         cube1_pos = self.data.geom_xpos[self._cube_geom_ids[0]]
         cube2_pos = self.data.geom_xpos[self._cube_geom_ids[1]]
@@ -290,9 +290,10 @@ class BowlingPickUp(gym.Env):
         self._ee.sync_target_to_pose()
         mujoco.mj_forward(self.bowling_scene, self.data)
         self._step_count = 0
-        self._previous_fallen = self.num_pins
+        fallen_pin_ids = self._fallen_pin_ids()
+        self._previous_fallen = len(fallen_pin_ids)
         self._rewarded_picked_up_pins.clear()
-        self._select_target_pin(set())
+        self._select_target_pin(fallen_pin_ids)
         self._touched_pins.clear()
         self._previous_pin_distance = self._relevant_pin_distance()
         self._last_action_time = float(self.data.time)
@@ -482,6 +483,9 @@ class BowlingPickUp(gym.Env):
             + success_reward
             + time_reward
         )
+        if self._target_pin_id not in fallen_pin_ids:
+            self._select_target_pin(fallen_pin_ids)
+            self._previous_pin_distance = self._relevant_pin_distance()
         if self.render_mode == "human":
             self.render()
         return (

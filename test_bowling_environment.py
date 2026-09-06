@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import warnings
+from unittest.mock import patch
 
 import mujoco
 import numpy as np
@@ -637,6 +638,36 @@ class BowlingEnvironmentTest(unittest.TestCase):
             displaced_distance = env.pin_between_cubes()
             print(f"{displaced_distance=}")
             self.assertGreater(displaced_distance, 0.0)
+        finally:
+            env.close()
+
+    def test_pickup_reset_selects_target_and_first_step_does_not_crash(self) -> None:
+        with patch("bowling_scene.uniform", return_value=1.0):
+            env = BowlingPickUp(num_pins=1, pins_fallen=True, max_steps=2)
+        try:
+            _, info = env.reset(seed=1)
+
+            self.assertEqual(info["fallen_pins"], 1)
+            self.assertEqual(env._target_pin_id, env._pin_ids[0])
+
+            _, _, terminated, truncated, _ = env.step(np.zeros(7, dtype=np.float32))
+            self.assertFalse(terminated)
+            self.assertFalse(truncated)
+            self.assertEqual(env._target_pin_id, env._pin_ids[0])
+        finally:
+            env.close()
+
+    def test_pickup_with_no_fallen_pins_finishes_without_target(self) -> None:
+        env = BowlingPickUp(num_pins=1, pins_fallen=False, max_steps=2)
+        try:
+            _, info = env.reset(seed=1)
+
+            self.assertEqual(info["fallen_pins"], 0)
+            self.assertIsNone(env._target_pin_id)
+
+            _, _, terminated, truncated, _ = env.step(np.zeros(7, dtype=np.float32))
+            self.assertTrue(terminated)
+            self.assertFalse(truncated)
         finally:
             env.close()
 
