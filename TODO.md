@@ -96,14 +96,19 @@
 - [x] Add a short smoke-training test suitable for regular regression checks.
 
 ## 9. Knocking over => picking up
-- [ ] create env for picking up pins
-  - copy paste bowling_simple.py
-  - reset rewards to zero
+- [x] create env for picking up pins
+  - copy paste `bowling_simple.py`
+- [x] initialize the target from the fallen pins during reset
+- [x] retarget after the current pin has been recovered
 - [ ] generate grasping poses
     - grasping pose is pin head position (or something else, TBD)
-- [ ] test for grasping pose: check through mujoco that collision is happening on both cubes
-- [ ] test for grasping pose: check that a closed gripper and moving causes a pin to move
-- [ ]
+- [x] test for grasping pose: check through mujoco that collision is happening on both cubes
+- [ ] **NEXT:** verify that a grasped pin follows the moving pincer
+  - close both jaws around the target pin
+  - move the pincer upward
+  - assert that the pin gains height and remains in contact
+- [ ] define pickup success using minimum pin clearance above the ground
+- [ ] design and tune the pickup reward components
 
 ## 10. Recording
 - [ ] record end-effector pose
@@ -115,11 +120,10 @@
 
 ## Suggested implementation order
 
-1. Fix observation and target-pin selection.
-2. Normalize actions and verify physical speed limits.
-3. Tune and unit-test reward components.
-4. Separate episode timeout from rollout length.
-5. Add the SB3 single-environment trainer.
-6. Add evaluation, logging, and checkpoints.
-7. Add vectorized environments.
-8. Tune PPO and reward scales using multiple seeds.
+1. Verify that a grasped pin follows the moving pincer.
+2. Define pickup success and tune the pickup rewards.
+3. Generate scripted grasping poses.
+4. Tune PPO and reward scales using multiple seeds.
+5. Benchmark rollout collection and policy-update devices.
+6. Add periodic evaluation videos and step recording.
+7. Declare the project's runtime dependencies.
