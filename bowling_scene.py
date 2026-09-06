@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import auto, StrEnum
+from random import random, uniform
 
 
 class PinComponent(StrEnum):
@@ -13,9 +14,10 @@ class PinComponent(StrEnum):
     STRIPE = auto()
 
 
-def _pin_xml(index: int, x: float, y: float) -> str:
+def _pin_xml(index: int, x: float, y: float, fallen_over: bool = False) -> str:
+    fallen = int(fallen_over)
     return f"""
-    <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08">
+    <body name="pin_{index}" pos="{x:.4f} {y:.4f} 0.08" euler="{uniform(0.4, 1) * fallen} {uniform(0.4, 1) * fallen} {random() * fallen}">
       <freejoint name="pin_{index}_free"/>
       <geom name="pin_{index}_{PinComponent.BASE}" type="cylinder" size="0.055 0.08" pos="0 0 0.08" rgba="0.92 0.92 0.94 1" density="50"/>
       <geom name="pin_{index}_{PinComponent.BODY}" type="capsule" size="0.05 0.20" pos="0 0 0.32" rgba="0.92 0.92 0.94 1" density="50"/>
@@ -85,24 +87,34 @@ def _pincer_xml() -> str:
       <joint name="object_pose" type="free" damping="1"/>
       <geom name="pincer_center_mass" type="box" size="0.01 0.01 0.01" mass="1.0" contype="0" conaffinity="0" rgba="0 0 0 0"/>
       <body name="cube_1_body" pos="-0.01 0 0">
+        <joint name="cube_distance_left" type="slide" axis="-1 0 0" limited="true" range="0.01 0.06" ref="0.01" damping="0.2"/>
         <geom name="cube_1" type="box" size="0.01 0.01 0.01" mass="0.05" condim="3" rgba="0.2 0.5 0.9 1"/>
       </body>
       <body name="cube_2_body" pos="0.01 0 0">
-        <joint name="cube_distance" type="slide" axis="1 0 0" limited="true" range="0.02 0.12" ref="0.02" damping="0.2"/>
+        <joint name="cube_distance_right" type="slide" axis="1 0 0" limited="true" range="0.01 0.06" ref="0.01" damping="0.2"/>
         <geom name="cube_2" type="box" size="0.01 0.01 0.01" mass="0.05" condim="3" rgba="0.9 0.3 0.2 1"/>
       </body>
     </body>
     """
 
 
-def make_bowling_xml(include_pincer: bool = False) -> str:
+def make_bowling_xml(
+    include_pincer: bool = False,
+    pins_fallen: bool = False,
+    num_pins: int = 10,
+) -> str:
+    if not 1 <= num_pins <= 10:
+        raise ValueError("num_pins must be between 1 and 10")
     positions = []
     spacing = 0.27
     for row in range(4):
         x: float = 1.25 + row * spacing * 0.86
         for column in range(row + 1):
             positions.append((x, (column - row / 2.0) * spacing))
-    pins: str = "\n".join(_pin_xml(i + 1, x, y) for i, (x, y) in enumerate(positions))
+    pins: str = "\n".join(
+        _pin_xml(i + 1, x, y, pins_fallen)
+        for i, (x, y) in enumerate(positions[:num_pins])
+    )
     pincer_constraints: str = (
         """
   <contact>
@@ -134,6 +146,8 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
     {_pincer_xml() if include_pincer else _panda_xml()}
   </worldbody>
   {pincer_constraints}
+  {('<equality><joint joint1="cube_distance_left" joint2="cube_distance_right" polycoef="0 1 0 0 0"/></equality>' if include_pincer else '')}
+  {('<tendon><fixed name="pincer_distance"><joint joint="cube_distance_left" coef="1"/><joint joint="cube_distance_right" coef="1"/></fixed></tendon>' if include_pincer else '')}
 
   <actuator>
     {
@@ -146,7 +160,7 @@ def make_bowling_xml(include_pincer: bool = False) -> str:
                 'kp="100" ctrlrange="0 0.04"/><position name="panda_finger_motor2" '
                 'joint="panda_finger_joint2" kp="100" ctrlrange="0 0.04"/>'
             ) if not include_pincer else '<position name="distance_command" '
-            'joint="cube_distance" kp="100" ctrllimited="true" '
+            'tendon="pincer_distance" kp="100" ctrllimited="true" '
             'ctrlrange="0.02 0.12" forcelimited="true" forcerange="-20 20"/>'
         )
     }
