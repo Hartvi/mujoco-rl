@@ -744,6 +744,57 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
+    def test_grasped_pin_follows_pincer_upward(self) -> None:
+        env = BowlingPickUp(num_pins=1, pins_fallen=False, max_steps=100)
+        try:
+            env.reset(seed=1)
+            pin_id = env._pin_ids[0]
+            pin_head = env._pin_component_ids[PinComponent.HEAD][0]
+            zero_action = np.zeros(7, dtype=np.float32)
+
+            # Let the pin settle on the lane before arranging the grasp.
+            for _ in range(10):
+                env.step(zero_action)
+
+            left_joint = mujoco.mj_name2id(
+                env.bowling_scene, mujoco.mjtObj.mjOBJ_JOINT, "cube_distance_left"
+            )
+            left_qpos = int(env.bowling_scene.jnt_qposadr[left_joint])
+            open_half_distance = env._ee.distance_range[1] / 2.0
+            env.data.qpos[left_qpos] = open_half_distance
+            env.data.qpos[env._ee.qpos_id] = open_half_distance
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            pincer_qpos = slice(env._ee.object_qpos_id, env._ee.object_qpos_id + 3)
+            cube_midpoint = np.mean(env.data.geom_xpos[env._cube_geom_ids], axis=0)
+            env.data.qpos[pincer_qpos] += env.data.geom_xpos[pin_head] - cube_midpoint
+            env.data.qvel[env._ee.object_dof_id : env._ee.object_dof_id + 6] = 0.0
+            mujoco.mj_forward(env.bowling_scene, env.data)
+            env._ee.sync_target_to_pose()
+
+            close_action = zero_action.copy()
+            close_action[6] = -1.0
+            upward_action = zero_action.copy()
+            upward_action[2] = 1.0
+
+            # Keep this pin selected so the test isolates grasp physics from
+            # pickup-target selection, which normally considers fallen pins.
+            with patch.object(env, "_fallen_pin_ids", return_value={pin_id}):
+                env._target_pin_id = pin_id
+                for _ in range(16):
+                    env.step(close_action)
+
+                self.assertTrue(env.both_touching_pins())
+                grasped_height = float(env.data.xpos[pin_id, 2])
+
+                for _ in range(6):
+                    env.step(upward_action)
+                    self.assertTrue(env.both_touching_pins())
+
+            self.assertGreater(float(env.data.xpos[pin_id, 2]), grasped_height + 0.2)
+        finally:
+            env.close()
+
 
 if __name__ == "__main__":
     unittest.main()
