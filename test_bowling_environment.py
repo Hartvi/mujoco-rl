@@ -671,6 +671,40 @@ class BowlingEnvironmentTest(unittest.TestCase):
         finally:
             env.close()
 
+    def test_pin_pickup_requires_minimum_ground_clearance(self) -> None:
+        env = BowlingPickUp(num_pins=1, pins_fallen=False)
+        try:
+            env.reset(seed=1)
+            pin_id = env._pin_ids[0]
+            pin_qpos_z = (
+                int(
+                    env.bowling_scene.jnt_qposadr[env.bowling_scene.body_jntadr[pin_id]]
+                )
+                + 2
+            )
+
+            initial_clearance = env.pin_ground_clearance(pin_id)
+            below_threshold = env.MIN_PICKUP_CLEARANCE - 0.01
+            env.data.qpos[pin_qpos_z] += below_threshold - initial_clearance
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            self.assertAlmostEqual(
+                env.pin_ground_clearance(pin_id), below_threshold, places=7
+            )
+            self.assertFalse(env.is_pin_picked_up(pin_id))
+
+            env.data.qpos[pin_qpos_z] += 0.02
+            mujoco.mj_forward(env.bowling_scene, env.data)
+
+            self.assertAlmostEqual(
+                env.pin_ground_clearance(pin_id),
+                env.MIN_PICKUP_CLEARANCE + 0.01,
+                places=7,
+            )
+            self.assertTrue(env.is_pin_picked_up(pin_id))
+        finally:
+            env.close()
+
     def test_both_touching(self) -> None:
         env = BowlingPickUp(num_pins=1)
         try:

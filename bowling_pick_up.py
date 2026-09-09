@@ -37,6 +37,7 @@ class BowlingPickUp(gym.Env):
     AWAY_DISTANCE_MULTIPLIER = 0.0
     # rewards
     MIN_GROUND_CLEARANCE = 0.01
+    MIN_PICKUP_CLEARANCE = 0.05
     NEWLY_STOOD_UP_REWARD = 0.0
     PIN_TOUCH_REWARD = 0.0
     GROUND_PENALTY_SCALE = 0.1
@@ -92,6 +93,9 @@ class BowlingPickUp(gym.Env):
             mujoco.mj_name2id(self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, name)
             for name in ("cube_1", "cube_2")
         ]
+        self._ground_geom_id = mujoco.mj_name2id(
+            self.bowling_scene, mujoco.mjtObj.mjOBJ_GEOM, "ground"
+        )
 
         self._pin_component_ids: dict[PinComponent, list[int]] = (
             self.get_pin_component_ids()
@@ -148,6 +152,28 @@ class BowlingPickUp(gym.Env):
                 float(self.data.geom_xpos[geom_id, 2]) - vertical_half_extent
             )
         return min(clearances)
+
+    def pin_ground_clearance(self, pin_id: int) -> float:
+        """Return the shortest distance between a pin and the ground."""
+        first_geom_id = int(self.bowling_scene.body_geomadr[pin_id])
+        geom_count = int(self.bowling_scene.body_geomnum[pin_id])
+        return min(
+            float(
+                mujoco.mj_geomDistance(
+                    self.bowling_scene,
+                    self.data,
+                    self._ground_geom_id,
+                    geom_id,
+                    np.inf,
+                    None,
+                )
+            )
+            for geom_id in range(first_geom_id, first_geom_id + geom_count)
+        )
+
+    def is_pin_picked_up(self, pin_id: int) -> bool:
+        """Return whether every part of a pin clears the pickup threshold."""
+        return self.pin_ground_clearance(pin_id) >= self.MIN_PICKUP_CLEARANCE
 
     def both_touching_pins(self) -> bool:
         if self.part is None or self._target_pin_id is None:
